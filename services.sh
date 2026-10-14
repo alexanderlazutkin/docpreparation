@@ -5,8 +5,9 @@
 #   1. Surya VLM (surya-2.gguf + mmproj, alias datalab-to/surya-ocr-2) —
 #      layout/OCR для marker. prepare_doc.sh автоматически аттачится к нему
 #      (SURYA_INFERENCE_URL) вместо spawn собственного сервера.
-#   2. LLM для --use_llm marker (склейка кросс-страничных таблиц, постправка);
-#      модель по умолчанию — локальная Qwen2.5-VL-7B-Instruct (UD-Q4_K_XL).
+#   2. LLM для --use_llm marker и VLM-описаний фигур (captioning); модель
+#      по умолчанию — локальная Qwen3.6-35B-A3B (UD-Q6_K_XL + mmproj-F32,
+#      32.7 ГБ; склейка кросс-страничных таблиц, постправка, чтение схем).
 #
 # Usage:
 #   ./services.sh start [--no-llm] [--llm-model PATH]   # surya (+ LLM, если не --no-llm)
@@ -21,8 +22,9 @@
 # Модели и порты (переопределяются окружением или .env):
 #   SURYA_MODEL / SURYA_MMPROJ  (деф. /media/llm/Models/datalab-to/surya-ocr-2-gguf/…)
 #   SURYA_PORT=8510  SURYA_PARALLEL=8  SURYA_CTX=parallel×12288
-#   LLM_MODEL (деф. /media/llm/Models/qwen-image/Qwen2.5-VL-7B-Instruct-UD-Q4_K_XL.gguf)
-#   LLM_PORT=8080  LLM_CTX=32768  LLM_PARALLEL=4
+#   LLM_MODEL (деф. /media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf)
+#   LLM_MMPROJ (деф. mmproj-F32.gguf рядом с моделью; пусто = текст-only сервис)
+#   LLM_PORT=8080  LLM_CTX=32768  LLM_PARALLEL=2 (35B: 2 слота × 16k)
 #   WAIT_SVC=600 (сек на загрузку модели в GPU)
 
 set -euo pipefail
@@ -36,10 +38,11 @@ SURYA_ALIAS="datalab-to/surya-ocr-2"
 SURYA_PORT="${SURYA_PORT:-8510}"
 SURYA_PARALLEL="${SURYA_PARALLEL:-8}"
 SURYA_CTX="${SURYA_CTX:-$((SURYA_PARALLEL * 12288))}"
-LLM_MODEL="${LLM_MODEL:-/media/llm/Models/qwen-image/Qwen2.5-VL-7B-Instruct-UD-Q4_K_XL.gguf}"
+LLM_MODEL="${LLM_MODEL:-/media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf}"
+LLM_MMPROJ="${LLM_MMPROJ:-/media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/mmproj-F32.gguf}"
 LLM_PORT="${LLM_PORT:-8080}"
 LLM_CTX="${LLM_CTX:-32768}"
-LLM_PARALLEL="${LLM_PARALLEL:-4}"
+LLM_PARALLEL="${LLM_PARALLEL:-2}"
 HOST="${SURYA_INFERENCE_HOST:-127.0.0.1}"
 WAIT_SVC="${WAIT_SVC:-600}"
 
@@ -140,9 +143,14 @@ start_surya() {
 
 start_llm() {
   [ -f "$LLM_MODEL" ] || die "llm: модель не найдена: $LLM_MODEL"
-  inf "llm: $LLM_MODEL, parallel=$LLM_PARALLEL, ctx=$LLM_CTX"
+  local mmargs=()
+  if [ -n "$LLM_MMPROJ" ]; then
+    [ -f "$LLM_MMPROJ" ] || die "llm: mmproj не найден: $LLM_MMPROJ"
+    mmargs=(--mmproj "$LLM_MMPROJ")
+  fi
+  inf "llm: $LLM_MODEL${LLM_MMPROJ:+ (VLM: $(basename "$LLM_MMPROJ"))}, parallel=$LLM_PARALLEL, ctx=$LLM_CTX"
   start_svc llm "$LLM_PID" "$LLM_LOG" "$LLM_PORT" "$(basename "${LLM_MODEL%.gguf}")" \
-    -m "$LLM_MODEL" -ngl 99 --parallel "$LLM_PARALLEL" --ctx-size "$LLM_CTX" \
+    -m "$LLM_MODEL" ${mmargs[@]+"${mmargs[@]}"} -ngl 99 --parallel "$LLM_PARALLEL" --ctx-size "$LLM_CTX" \
     --alias "$(basename "${LLM_MODEL%.gguf}")" --jinja
 }
 
@@ -238,6 +246,6 @@ case "$CMD" in
     ;;
   check|status) check ;;
   help|-h|--help|*)
-    sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     ;;
 esac

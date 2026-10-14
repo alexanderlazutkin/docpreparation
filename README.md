@@ -171,8 +171,9 @@ docpreparation/
 ├── pyproject.toml + uv.lock        # uv-проект, marker-pdf (uv sync; .venv вне git)
 ├── services.sh                     # запуск/остановка inference-сервисов (llama-server, Vulkan)
 ├── scripts/
-│   ├── prepare_doc.sh              # конвертация → QC → авто-ретрай --force_ocr
-│   └── qc_check.py                 # кириллица ≥55%, лидеры, переносы, таблицы
+│   ├── prepare_doc.sh              # конвертация → captioning → QC → авто-ретрай --force_ocr
+│   ├── qc_check.py                 # кириллица ≥55%, лидеры, переносы, таблицы
+│   └── caption_figures.py          # VLM-описания фигур (Qwen3.6-35B) → находимость графики в RAG
 ├── .env.example                    # пути к локальным GGUF surya → cp .env.example .env
 ├── .opencode/skills/docprep/       # навык агента opencode (версионируется в репо)
 ├── inbox/                          # исходные PDF (вне git)

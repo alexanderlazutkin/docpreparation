@@ -13,12 +13,15 @@ description: Подготовка PDF к загрузке в базу знани
 
 ## Сервисы inference (`services.sh`)
 ```bash
-./services.sh start            # surya VLM :8510 (alias datalab-to/surya-ocr-2) + LLM :8080 (Qwen2.5-VL-7B)
+./services.sh start            # surya VLM :8510 + LLM/VLM :8080 (Qwen3.6-35B-A3B + mmproj-F32, 32.7 ГБ)
 ./services.sh check --deep     # статус + проба генерации
 ./services.sh stop             # остановить свои (чужой llama-server не трогает)
 ```
-`prepare_doc.sh` сам аттачится к поднятому surya (SURYA_INFERENCE_URL) — spawn собственного сервера не происходит.
-Для `--use_llm` брать модель/URL из вывода `services.sh check` (строка с флагами marker).
+- `prepare_doc.sh` сам аттачится к поднятому surya (SURYA_INFERENCE_URL) и запускает
+  **captioning фигур** через LLM-сервис (VLM-описания после каждой картинки — графика
+  становится находимой в текстовом RAG; Cherry Studio сами картинки не индексирует).
+  Без поднятого LLM-сервиса captioning тихо пропускается; отключение — `CAPTION_FIGURES=0`.
+- Для `--use_llm` брать модель/URL из вывода `services.sh check` (строка с флагами marker).
 
 ## Базовый цикл (начинать всегда с него)
 ```bash

@@ -21,15 +21,29 @@ STEM="$(basename "${IN%.*}")"
 OUT="${OUT:-$ROOT/outbox}"
 MD="$OUT/$STEM/$STEM.md"
 
+qc() { uv run --project "$ROOT" python "$ROOT/scripts/qc_check.py" "$MD"; }
+
+CAPTION_FIGURES="${CAPTION_FIGURES:-1}"
+caption() {
+    [ "$CAPTION_FIGURES" = 1 ] || return 0
+    if ! curl -sf -m 2 "http://127.0.0.1:${LLM_PORT:-8080}/v1/models" >/dev/null 2>&1; then
+        echo ">> LLM-сервис не поднят — captioning фигур пропущен (./services.sh start)"
+        return 0
+    fi
+    echo ">> captioning фигур (VLM-описания для поиска)"
+    uv run --project "$ROOT" python "$ROOT/scripts/caption_figures.py" "$MD" \
+        || echo ">> captioning: ошибка, продолжаем без описаний"
+}
+
 echo ">> marker: $IN -> $OUT"
 uv run --project "$ROOT" marker_single "$IN" --output_dir "$OUT" --mode balanced ${EXTRA[@]+"${EXTRA[@]}"}
-
-qc() { uv run --project "$ROOT" python "$ROOT/scripts/qc_check.py" "$MD"; }
+caption
 
 if ! qc; then
     echo ">> QC FAIL, ретрай с --force_ocr"
     rm -rf "$OUT/$STEM"
     uv run --project "$ROOT" marker_single "$IN" --output_dir "$OUT" --mode balanced --force_ocr ${EXTRA[@]+"${EXTRA[@]}"}
+    caption
     qc || { echo ">> QC FAIL даже после force_ocr: $MD"; exit 1; }
 fi
 echo ">> QC PASS: $MD"
