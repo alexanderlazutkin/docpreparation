@@ -190,14 +190,20 @@ docpreparation/
 - Layout-модель fast-режима (`datalab-to/surya_layout2`) при первом fast-прогоне
   скачается в HF-кэш (~сотни МБ) — это нормально.
 
-### Быстрый старт
+### Рабочий цикл (инструкция)
 ```bash
-cp .env.example .env
-./services.sh start                 # surya VLM (:8510) + LLM (:8080) на GPU; check --deep — проба
-cp файл.pdf inbox/
-scripts/prepare_doc.sh inbox/файл.pdf    # аттач к постоянному surya → outbox/<имя>/<имя>.md + QC
-./services.sh stop                  # остановить свои сервисы (чужие не трогает)
+cp .env.example .env                 # один раз: пути к моделям
+./services.sh start                  # 1) модели на GPU: surya :8510 + Qwen3.6-35B :8080
+cp файл(ы).pdf inbox/                # 2) исходники
+scripts/prepare_all.sh               # 3) обработка ВСЕХ файлов inbox/ (окно терминала:
+                                     #    агент запускает через scripts/launch_batch.sh)
+./services.sh stop                   # 4) по завершении
 ```
+- Стадии на файл: `[1/5] marker → [2/5] captioning → [3/5] QC → [4/5] force_ocr-ретрай (при FAIL) → [5/5] готово`.
+- Resume: готовые (`outbox/<имя>/.qc_pass`) пропускаются; `--force` — переобработать всё.
+- Логи: `logs/<имя>.log` на файл, `logs/batch_<датавремя>.log` сводный; для мониторинга —
+  `logs/batch_latest.log` (ход) и `logs/batch_latest.result` (итог).
+- Результат: `outbox/<имя>/<имя>.md` (+ фигуры, `_meta.json`).
 
 ## 9. Ссылки
 

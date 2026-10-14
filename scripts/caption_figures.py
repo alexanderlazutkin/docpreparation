@@ -4,13 +4,23 @@
 После каждой ссылки на картинку в MD вставляет blockquote с плотным описанием
 схемы (тип, узлы, связи, подписи) — делает графику находимой в текстовом RAG
 (Cherry Studio не индексирует сами изображения). Идемпотентно: уже описанные
-фигуры пропускаются. Требует LLM-сервис с mmproj (services.sh start).
+фигуры пропускаются. MD перезаписывается после каждой фигуры (устойчивость
+к прерыванию). Требует LLM-сервис с mmproj (services.sh start).
 
 Usage: caption_figures.py <file.md> [--limit N] [--api http://127.0.0.1:8080/v1]
 Env:  CAPTION_API, CAPTION_MIN_BYTES (деф. 20000 — отсекает декоративные)
 """
 
-import argparse, base64, json, mimetypes, os, pathlib, re, sys, time, urllib.request
+import argparse
+import base64
+import json
+import mimetypes
+import os
+import pathlib
+import re
+import sys
+import time
+import urllib.request
 
 MARK = "> **VLM-описание:**"
 IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+\.(?:png|jpe?g|gif|webp))\)", re.I)
@@ -83,34 +93,53 @@ def main():
     a = ap.parse_args()
     min_bytes = int(os.environ.get("CAPTION_MIN_BYTES", "20000"))
 
-    md = a.md.read_text(encoding="utf-8")
-    lines = md.splitlines(keepends=True)
+    lines = a.md.read_text(encoding="utf-8").splitlines(keepends=True)
     try:
         alias = model_alias(a.api)
     except Exception:
         print("captioning: LLM-сервис не отвечает на " + a.api, file=sys.stderr)
         sys.exit(2)
 
-    done = cached = skipped = tiny = 0
-    described = {}
-    out = []
+    def path_of(ref):
+        p = (a.md.parent / ref).resolve()
+        return p if (p.is_file() and p.stat().st_size >= min_bytes) else None
+
+    def described(i):  # есть ли blockquote-описание у ссылок строки i
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        return j < len(lines) and lines[j].startswith(MARK)
+
+    # проход 1: очередь уникальных неописанных фигур (для M и resume)
+    todo, seen = [], set()
+    for i, ln in enumerate(lines):
+        if described(i):
+            continue
+        for m in IMG_RE.finditer(ln):
+            p = path_of(m.group(1))
+            if p and p not in seen:
+                seen.add(p)
+                todo.append(p)
+    m_total = len(todo)
+    if not todo:
+        print(f"captioning: новых фигур нет ({a.md.name})")
+        return
+
+    # проход 2: вставка описаний, MD пишем после каждой фигуры
+    out, done, cached, tiny = [], 0, 0, 0
+    described_now = set()
     for i, ln in enumerate(lines):
         out.append(ln)
-        refs = [m.group(1) for m in IMG_RE.finditer(ln)]
-        if not refs:
+        refs = [mm.group(1) for mm in IMG_RE.finditer(ln)]
+        if not refs or described(i):
             continue
-        # уже описано? (следующая непустая строка — наш blockquote)
-        j = len(out)
-        nxt = next((s for s in out[j:] if s.strip()), "") if j < len(out) else ""
         ins = []
         for ref in refs:
-            p = (a.md.parent / ref).resolve()
-            if not p.is_file():
-                continue
-            if p.stat().st_size < min_bytes:
+            p = path_of(ref)
+            if p is None:
                 tiny += 1
                 continue
-            if p in described:
+            if p not in todo or p in described_now:
                 cached += 1
                 continue
             if a.limit and done >= a.limit:
@@ -119,17 +148,21 @@ def main():
             txt, dt = describe(a.api, alias, p, ctx)
             if txt:
                 ins.append(f"{MARK} {txt}\n")
-                described[p] = True
+                described_now.add(p)
                 done += 1
-                print(f"  + {p.name}: {len(txt)} симв. ({dt:.0f}с)", flush=True)
+                print(
+                    f"  [{done}/{m_total}] {p.name}: {len(txt)} симв. ({dt:.0f}с)",
+                    flush=True,
+                )
         out.extend(ins)
+        if ins:  # инкрементальная запись: прерывание не теряет работу
+            a.md.write_text("".join(out), encoding="utf-8")
 
     a.md.write_text("".join(out), encoding="utf-8")
     print(
-        f"captioning: описано {done}, повторных ссылок {cached}, "
-        f"мелких пропущено {tiny} → {a.md.name}"
+        f"captioning: описано {done}/{m_total}, повторных ссылок {cached}, "
+        f"мелких/битых пропущено {tiny} -> {a.md.name}"
     )
-    sys.exit(0)
 
 
 if __name__ == "__main__":

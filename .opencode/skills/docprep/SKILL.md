@@ -24,11 +24,15 @@ description: Подготовка PDF к загрузке в базу знани
 - Для `--use_llm` брать модель/URL из вывода `services.sh check` (строка с флагами marker).
 
 ## Базовый цикл (начинать всегда с него)
-```bash
-cp файл.pdf inbox/
-scripts/prepare_doc.sh inbox/файл.pdf   # balanced → QC → авто-ретрай --force_ocr
-```
-Скрипт печатает `QC PASS`/`QC FAIL` и путь к `.md`. При FAIL даже после `--force_ocr` — разбор причин ниже.
+1. `./services.sh start` — модели на GPU (surya :8510 + Qwen3.6-35B :8080).
+2. Исходники в `inbox/`.
+3. Запуск обработки — **только через `scripts/launch_batch.sh [--force]`**: агент открывает
+   пользователю видимое окно терминала с `prepare_all.sh` (стадии/прогресс видны человеку).
+   НЕ запускать prepare_all в фоне из агента без окна.
+4. Агент следит за ходом по `logs/batch_latest.log` (стадии `[k/5]`, captioning `[N/M]`),
+   итог — `logs/batch_latest.result`; per-file логи — `logs/<имя>.log`.
+5. По завершении: `./services.sh stop` (если пользователь не просил держать).
+Одиночный файл/переобработка: `scripts/prepare_doc.sh [--force] <file.pdf>`.
 
 ## Выбор режима marker_single
 | Ситуация | Флаги |

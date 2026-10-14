@@ -1,6 +1,7 @@
 # Рабочие каталоги (исходные и итоговые файлы)
 inbox/
 outbox/
+logs/
 
 # Python/uv
 .venv/
