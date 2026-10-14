@@ -192,7 +192,7 @@ docpreparation/
 
 ### Рабочий цикл (инструкция)
 ```bash
-cp .env.example .env                 # один раз: пути к моделям
+cp .env.example .env                 # один раз: пути к моделям (+ опц. облако для captioning)
 ./services.sh start                  # 1) модели на GPU: surya :8510 + Qwen3.6-35B :8080
 cp файл(ы).pdf inbox/                # 2) исходники
 scripts/prepare_all.sh               # 3) обработка ВСЕХ файлов inbox/ (окно терминала:
@@ -200,8 +200,17 @@ scripts/prepare_all.sh               # 3) обработка ВСЕХ файло
 ./services.sh stop                   # 4) по завершении
 ```
 - Стадии на файл: `[1/5] marker → [2/5] captioning → [3/5] QC → [4/5] force_ocr-ретрай (при FAIL) → [5/5] готово`.
-- Resume: готовые (`outbox/<имя>/.qc_pass`) пропускаются; `--force` — переобработать всё.
-- Логи: `logs/<имя>.log` на файл, `logs/batch_<датавремя>.log` сводный; для мониторинга —
+- **ETA**: при старте файла/фрагмента — оценка по медиане из `logs/timings.jsonl`
+  (сид 8.4 с/стр до накопления истории); в captioning — остаток по скользящему среднему.
+- **Диапазон/фрагменты** (тесты и большие файлы):
+  `prepare_all.sh --pages "1-30"` — только стр. 1–30; `--fragments 4` — диапазон делится
+  на 4 фрагмента, обрабатываются поочерёдно (каждый — `outbox/<имя>__pS-E/`, свой resume;
+  QC в мягком режиме без force_ocr-ретрая). Дефолты: S=1, E=0 (до конца), фрагментов=1.
+- **Облако для captioning** (ускорение; OCR/layout остаётся локальным на surya):
+  раскомментировать в `.env` `CAPTION_API/CAPTION_MODEL/CAPTION_API_KEY` (OpenAI-совместимый,
+  напр. OpenRouter с VL-моделью). `--use_llm` marker тоже умеет любое облако (README раздел 4).
+- Resume: готовые (`outbox/<имя>[__pS-E]/.qc_pass`) пропускаются; `--force` — переобработать.
+- Логи: `logs/<имя>.log` на файл, `logs/batch_<датавремя>.log` сводный; мониторинг агентом —
   `logs/batch_latest.log` (ход) и `logs/batch_latest.result` (итог).
 - Результат: `outbox/<имя>/<имя>.md` (+ фигуры, `_meta.json`).
 

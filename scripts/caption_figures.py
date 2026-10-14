@@ -43,33 +43,39 @@ def describe(api, alias, img_path, ctx):
     data = img_path.read_bytes()
     b64 = base64.b64encode(data).decode()
     mime = mimetypes.guess_type(str(img_path))[0] or "image/jpeg"
+    headers = {"Content-Type": "application/json"}
+    # облачный провайдер (OpenAI-совместимый): ключ из окружения
+    if os.environ.get("CAPTION_API_KEY"):
+        headers["Authorization"] = f"Bearer {os.environ['CAPTION_API_KEY']}"
+    body = {
+        "model": alias,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    },
+                    {
+                        "type": "text",
+                        "text": PROMPT.format(ctx=ctx[-500:] or "(нет)"),
+                    },
+                ],
+            }
+        ],
+        "max_tokens": 600,
+        "temperature": 0.1,
+    }
+    # thinking-модели (Qwen3.x): иначе reasoning попадает в content.
+    # Облачные API строго валидируют поля — kwargs шлём только локальным llama.cpp
+    local = any(h in api for h in ("127.0.0.1", "localhost", "0.0.0.0", "[::1]"))
+    if local or os.environ.get("CAPTION_FORCE_KWARGS") == "1":
+        body["chat_template_kwargs"] = {"enable_thinking": False}
     req = urllib.request.Request(
         f"{api}/chat/completions",
-        data=json.dumps(
-            {
-                "model": alias,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{mime};base64,{b64}"},
-                            },
-                            {
-                                "type": "text",
-                                "text": PROMPT.format(ctx=ctx[-500:] or "(нет)"),
-                            },
-                        ],
-                    }
-                ],
-                "max_tokens": 600,
-                "temperature": 0.1,
-                # thinking-модели (Qwen3.x): иначе reasoning попадает в content
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
-        ).encode(),
-        headers={"Content-Type": "application/json"},
+        data=json.dumps(body).encode(),
+        headers=headers,
     )
     t0 = time.time()
     r = json.load(urllib.request.urlopen(req, timeout=600))
@@ -90,12 +96,17 @@ def main():
     ap.add_argument(
         "--api", default=os.environ.get("CAPTION_API", "http://127.0.0.1:8080/v1")
     )
+    ap.add_argument(
+        "--model",
+        default=os.environ.get("CAPTION_MODEL", ""),
+        help="имя модели; пусто = первая из /models (локальный llama-server)",
+    )
     a = ap.parse_args()
     min_bytes = int(os.environ.get("CAPTION_MIN_BYTES", "20000"))
 
     lines = a.md.read_text(encoding="utf-8").splitlines(keepends=True)
     try:
-        alias = model_alias(a.api)
+        alias = a.model or model_alias(a.api)
     except Exception:
         print("captioning: LLM-сервис не отвечает на " + a.api, file=sys.stderr)
         sys.exit(2)
@@ -127,7 +138,7 @@ def main():
 
     # проход 2: вставка описаний, MD пишем после каждой фигуры
     out, done, cached, tiny = [], 0, 0, 0
-    described_now = set()
+    described_now, durations = set(), []
     for i, ln in enumerate(lines):
         out.append(ln)
         refs = [mm.group(1) for mm in IMG_RE.finditer(ln)]
@@ -150,8 +161,16 @@ def main():
                 ins.append(f"{MARK} {txt}\n")
                 described_now.add(p)
                 done += 1
+                durations.append(dt)
+                avg = sum(durations) / len(durations)
+                rem = max(0, m_total - done) * avg
+                eta = (
+                    f"; осталось ~{int(rem // 60)} мин {int(rem % 60)} с"
+                    if len(durations) > 1
+                    else ""
+                )
                 print(
-                    f"  [{done}/{m_total}] {p.name}: {len(txt)} симв. ({dt:.0f}с)",
+                    f"  [{done}/{m_total}] {p.name}: {len(txt)} симв. ({dt:.0f}с{eta})",
                     flush=True,
                 )
         out.extend(ins)
