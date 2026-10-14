@@ -11,6 +11,15 @@ description: Подготовка PDF к загрузке в базу знани
 - Веса surya-2 GGUF — локально (`/media/llm/Models/datalab-to/surya-ocr-2-gguf`, проверены байт-в-байт с HF), пути задаются в `.env` через `SURYA_GGUF_LOCAL_MODEL_PATH`/`SURYA_GGUF_LOCAL_MMPROJ_PATH`
 - Исходники кладём в `inbox/`, результаты появляются в `outbox/` — оба каталога вне git
 
+## Сервисы inference (`services.sh`)
+```bash
+./services.sh start            # surya VLM :8510 (alias datalab-to/surya-ocr-2) + LLM :8080 (Qwen2.5-VL-7B)
+./services.sh check --deep     # статус + проба генерации
+./services.sh stop             # остановить свои (чужой llama-server не трогает)
+```
+`prepare_doc.sh` сам аттачится к поднятому surya (SURYA_INFERENCE_URL) — spawn собственного сервера не происходит.
+Для `--use_llm` брать модель/URL из вывода `services.sh check` (строка с флагами marker).
+
 ## Базовый цикл (начинать всегда с него)
 ```bash
 cp файл.pdf inbox/

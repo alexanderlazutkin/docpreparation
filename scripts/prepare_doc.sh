@@ -6,6 +6,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
 
+# Аттач к постоянному surya-серверу (services.sh start), если поднят
+SURYA_PORT="${SURYA_PORT:-8510}"
+if [ -z "${SURYA_INFERENCE_URL:-}" ] && curl -sf -m 2 "http://127.0.0.1:$SURYA_PORT/v1/models" >/dev/null 2>&1; then
+    export SURYA_INFERENCE_URL="http://127.0.0.1:$SURYA_PORT/v1"
+    echo ">> аттач к постоянному surya-серверу :$SURYA_PORT"
+fi
+
 IN="${1:?usage: prepare_doc.sh <file.pdf> [marker flags...]}"
 shift
 EXTRA=("$@")

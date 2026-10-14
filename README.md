@@ -169,6 +169,7 @@ OpenAI-совместимый эндпоинт** (`--llm_service marker.services
 ```
 docpreparation/
 ├── pyproject.toml + uv.lock        # uv-проект, marker-pdf (uv sync; .venv вне git)
+├── services.sh                     # запуск/остановка inference-сервисов (llama-server, Vulkan)
 ├── scripts/
 │   ├── prepare_doc.sh              # конвертация → QC → авто-ретрай --force_ocr
 │   └── qc_check.py                 # кириллица ≥55%, лидеры, переносы, таблицы
@@ -191,8 +192,10 @@ docpreparation/
 ### Быстрый старт
 ```bash
 cp .env.example .env
+./services.sh start                 # surya VLM (:8510) + LLM (:8080) на GPU; check --deep — проба
 cp файл.pdf inbox/
-scripts/prepare_doc.sh inbox/файл.pdf    # → outbox/<имя>/<имя>.md + QC PASS/FAIL
+scripts/prepare_doc.sh inbox/файл.pdf    # аттач к постоянному surya → outbox/<имя>/<имя>.md + QC
+./services.sh stop                  # остановить свои сервисы (чужие не трогает)
 ```
 
 ## 9. Ссылки
