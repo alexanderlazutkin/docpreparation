@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# PDF -> Markdown: [1/5] marker (balanced) -> [2/5] captioning -> [3/5] QC
-#   -> [4/5] ретрай --force_ocr (ТОЛЬКО с флагом --retry-ocr; для фрагментов
-#   QC всегда мягкий) -> [5/5] готово + запись тайминга в logs/timings.jsonl.
+# PDF -> Markdown: [1/6] marker (balanced) -> [2/6] captioning -> [3/6] cleanup
+#   (точечные лидеры TOC) -> [4/6] QC -> [5/6] ретрай --force_ocr (ТОЛЬКО с
+#   флагом --retry-ocr; для фрагментов QC всегда мягкий) -> [6/6] готово.
 # Диапазон: --pages "S[-E]" (1-индекс; без E или E=0 — до конца документа).
 #   Фрагмент пишется в outbox/<имя>__pS-E/ (полный документ — в outbox/<имя>/).
 # Статус: outbox/<...>/.status; успех: .qc_pass (resume); --force — переобработка.
@@ -70,6 +70,10 @@ fi
 qc() { uv run --project "$ROOT" python "$ROOT/scripts/qc_check.py" "$MD"; }
 
 CAPTION_FIGURES="${CAPTION_FIGURES:-1}"
+cleanup() {
+    stage 3/6 "cleanup (лидеры оглавления)"
+    uv run --project "$ROOT" python "$ROOT/scripts/clean_md.py" "$MD"
+}
 caption() {
     [ "$CAPTION_FIGURES" = 1 ] || return 0
     local est; est="$(find "$DIR" -maxdepth 1 -type f \( -name '*.jp*g' -o -name '*.png' \) -size +20k 2>/dev/null | wc -l)"
@@ -84,14 +88,14 @@ caption() {
         fi
     fi
     local tc0=$SECONDS
-    stage 2/5 "captioning фигур (VLM-описания для поиска)"
+    stage 2/6 "captioning фигур (VLM-описания для поиска)"
     uv run --project "$ROOT" python "$ROOT/scripts/caption_figures.py" "$MD" \
         || echo "[--] captioning: ошибка, продолжаем без описаний"
     TC=$((SECONDS-tc0))
 }
 
 echo "== $STEM (${N_PAGES} стр.) =="
-stage 1/5 "marker (balanced)"
+stage 1/6 "marker (balanced)"
 # marker именует выход по имени файла: гоним во временный каталог и переносим
 TMP="$OUT/.tmp.$$"; rm -rf "$TMP"; mkdir -p "$TMP"
 local_tm0=$SECONDS
@@ -108,15 +112,16 @@ if [ "$STEM" != "$STEM_BASE" ]; then  # фрагмент: MD и meta под им
     [ -f "$DIR/${STEM_BASE}_meta.json" ] && mv "$DIR/${STEM_BASE}_meta.json" "$DIR/${STEM}_meta.json"
 fi
 caption
+cleanup
 
 QCRC=0
-stage 3/5 "QC"
+stage 4/6 "QC"
 if ! qc; then
     QCRC=1
     if [ "$QC_SOFT" = 1 ]; then
         echo "[--] QC FAIL — мягкий режим фрагмента, без ретрая"
     elif [ "$RETRY_OCR" = 1 ]; then
-        stage 4/5 "QC FAIL -> ретрай --force_ocr (--retry-ocr)"
+        stage 5/6 "QC FAIL -> ретрай --force_ocr (--retry-ocr)"
         rm -rf "$DIR" "$TMP"
         mkdir -p "$TMP"
         local_tm0=$SECONDS
@@ -130,7 +135,8 @@ if ! qc; then
             [ -f "$DIR/${STEM_BASE}_meta.json" ] && mv "$DIR/${STEM_BASE}_meta.json" "$DIR/${STEM}_meta.json"
         fi
         caption
-        stage 3/5 "QC (после force_ocr)"
+        cleanup
+        stage 4/6 "QC (после force_ocr)"
         qc || { echo "[FAIL] $STEM: QC FAIL даже после force_ocr -> $MD"; exit 1; }
         QCRC=0
     else
@@ -141,7 +147,7 @@ fi
 
 FIGS="$(grep -cF '**VLM-описание:**' "$MD" 2>/dev/null || true)"
 touch "$DIR/.qc_pass"
-stage 5/5 "готово"
+stage 6/6 "готово"
 mkdir -p "$ROOT/logs"
 printf '{"stem":"%s","pages":%s,"marker_s":%s,"caption_s":%s,"figs":%s,"total_s":%s}\n' \
     "$STEM" "$N_PAGES" "$TM" "$TC" "$FIGS" "$((SECONDS-T0))" >> "$ROOT/logs/timings.jsonl"

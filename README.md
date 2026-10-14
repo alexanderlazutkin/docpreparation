@@ -171,9 +171,11 @@ docpreparation/
 ├── pyproject.toml + uv.lock        # uv-проект, marker-pdf (uv sync; .venv вне git)
 ├── services.sh                     # запуск/остановка inference-сервисов (llama-server, Vulkan)
 ├── scripts/
-│   ├── prepare_doc.sh              # конвертация → captioning → QC → авто-ретрай --force_ocr
-│   ├── qc_check.py                 # кириллица ≥55%, лидеры, переносы, таблицы
-│   └── caption_figures.py          # VLM-описания фигур (Qwen3.6-35B) → находимость графики в RAG
+│   ├── prepare_doc.sh              # конвертация → captioning → cleanup → QC (стадии 1/6…6/6)
+│   ├── prepare_all.sh              # пакет: inbox/*.pdf, resume, ETA, --pages/--fragments/--retry-ocr
+│   ├── qc_check.py                 # кириллица ≥55% (среди букв), лидеры, переносы, таблицы
+│   ├── caption_figures.py          # VLM-описания фигур (Qwen3.6-35B) → находимость графики в RAG
+│   └── clean_md.py                 # вычистка точечных лидеров оглавления
 ├── .env.example                    # пути к локальным GGUF surya → cp .env.example .env
 ├── .opencode/skills/docprep/       # навык агента opencode (версионируется в репо)
 ├── inbox/                          # исходные PDF (вне git)
@@ -199,7 +201,7 @@ scripts/prepare_all.sh               # 3) обработка ВСЕХ файло
                                      #    агент запускает через scripts/launch_batch.sh)
 ./services.sh stop                   # 4) по завершении
 ```
-- Стадии на файл: `[1/5] marker → [2/5] captioning → [3/5] QC → [4/5] force_ocr-ретрай (только с `--retry-ocr`) → [5/5] готово`.
+- Стадии на файл: `[1/6] marker → [2/6] captioning → [3/6] cleanup (лидеры TOC) → [4/6] QC → [5/6] force_ocr-ретрай (только с `--retry-ocr`) → [6/6] готово`. Кириллица в QC считается среди букв (иммунитет к пробельным паддингам таблиц).
 - **ETA**: при старте файла/фрагмента — оценка по медиане из `logs/timings.jsonl`
   (сид 8.4 с/стр до накопления истории); в captioning — остаток по скользящему среднему.
 - **Диапазон/фрагменты** (тесты и большие файлы):
