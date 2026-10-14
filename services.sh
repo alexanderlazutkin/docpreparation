@@ -13,8 +13,13 @@
 #   ./services.sh start [--no-llm] [--llm-model PATH] [--llm-parallel N]   # N деф. 2
 #                                       # surya (+ LLM, если не --no-llm);
 #                                       # --llm-parallel — слоты LLM-сервера
+#   ./services.sh start [--surya-model PATH] [--surya-mmproj PATH]
+#                       [--surya-parallel N]          # подмена OCR-VLM за алиасом
+#                                       # datalab-to/surya-ocr-2 (тест GLM-OCR,
+#                                       # PaddleOCR-VL); N деф. 8 (SURYA_PARALLEL)
 #   ./services.sh stop [--no-llm]                       # остановка только своих сервисов
 #   ./services.sh restart [--no-llm] [--llm-model PATH] [--llm-parallel N]
+#                       [--surya-model PATH] [--surya-mmproj PATH] [--surya-parallel N]
 #   ./services.sh check [--deep]                         # статус; --deep = проба генерации
 #
 # Сервис считается «своим», если запущен этим скриптом (pid-файл). Чужой
@@ -215,6 +220,7 @@ check() {
 
 CMD="help"; [ $# -gt 0 ] && CMD="$1"; shift || true
 DEEP=0 NO_LLM=0 PARALLEL_GIVEN=0 MODEL_GIVEN=0
+S_PARALLEL_GIVEN=0 S_MODEL_GIVEN=0 S_MMPROJ_GIVEN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1; shift ;;
@@ -223,10 +229,21 @@ while [ $# -gt 0 ]; do
     --llm-model=*) LLM_MODEL="${1#*=}"; MODEL_GIVEN=1; shift ;;
     --llm-parallel) LLM_PARALLEL="${2:?--llm-parallel требует значение}"; PARALLEL_GIVEN=1; shift 2 ;;
     --llm-parallel=*) LLM_PARALLEL="${1#*=}"; PARALLEL_GIVEN=1; shift ;;
+    --surya-model) SURYA_MODEL="${2:?--surya-model требует значение}"; S_MODEL_GIVEN=1; shift 2 ;;
+    --surya-model=*) SURYA_MODEL="${1#*=}"; S_MODEL_GIVEN=1; shift ;;
+    --surya-mmproj) SURYA_MMPROJ="${2:?--surya-mmproj требует значение}"; S_MMPROJ_GIVEN=1; shift 2 ;;
+    --surya-mmproj=*) SURYA_MMPROJ="${1#*=}"; S_MMPROJ_GIVEN=1; shift ;;
+    --surya-parallel) SURYA_PARALLEL="${2:?--surya-parallel требует значение}"; S_PARALLEL_GIVEN=1; shift 2 ;;
+    --surya-parallel=*) SURYA_PARALLEL="${1#*=}"; S_PARALLEL_GIVEN=1; shift ;;
     *) die "неизвестный аргумент: $1 (см. ./services.sh help)" ;;
   esac
 done
 [ "${LLM_PARALLEL:-2}" -ge 1 ] 2>/dev/null || die "--llm-parallel: ожидается целое >= 1"
+[ "${SURYA_PARALLEL:-8}" -ge 1 ] 2>/dev/null || die "--surya-parallel: ожидается целое >= 1"
+[ "$S_PARALLEL_GIVEN" = 1 ] && SURYA_CTX="$((SURYA_PARALLEL * 12288))"  # пересчёт под слоты
+if [ "$S_MODEL_GIVEN" = 1 ] && [ "$S_MMPROJ_GIVEN" = 0 ]; then
+  die "--surya-model требует также --surya-mmproj (mmproj обязателен для VLM)"
+fi
 
 case "$CMD" in
   start)
@@ -245,8 +262,11 @@ case "$CMD" in
     NL=""; [ "$NO_LLM" = 1 ] && NL="--no-llm"
     LM=""; [ "$MODEL_GIVEN" = 1 ] && LM="--llm-model $LLM_MODEL"
     LP=""; [ "$PARALLEL_GIVEN" = 1 ] && LP="--llm-parallel $LLM_PARALLEL"
+    SM=""; [ "$S_MODEL_GIVEN" = 1 ] && SM="--surya-model $SURYA_MODEL"
+    SP=""; [ "$S_MMPROJ_GIVEN" = 1 ] && SP="--surya-mmproj $SURYA_MMPROJ"
+    SL=""; [ "$S_PARALLEL_GIVEN" = 1 ] && SL="--surya-parallel $SURYA_PARALLEL"
     "$0" stop $NL
-    "$0" start $NL $LM $LP
+    "$0" start $NL $LM $LP $SM $SP $SL
     ;;
   check|status) check ;;
   help|-h|--help|*)
