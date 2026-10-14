@@ -58,20 +58,24 @@
 ## Следующие шаги (по приоритету)
 1. Загрузить готовый `.md` в БЗ Cherry Studio через UI; проверить реальными
    поисковыми запросами (главный приёмочный тест всей затеи).
-2. Эксперимент A: fast-режим на чистом цифровом PDF (нужен файл в inbox/,
+2. **Адаптер-прокси PaddleOCR-VL → marker** (запланированная задача, bd-бедка):
+   OpenAI-совместимый прокси (~100–200 строк) держит алиас
+   `datalab-to/surya-ocr-2` (на него указывает SURYA_INFERENCE_URL); роутинг по
+   промпту: layout/table_rec/high_accuracy_bbox → surya-2 (:8510) как есть;
+   block-OCR («OCR this block image to HTML.») → Paddle (:8512) с заменой
+   промпта на `<|ocr|>` и обёрткой plain-text ответа в `<p>…</p>` HTML.
+   Требует: /v1/models с алиасом, /health, t=0; smoke на таблицах (текст ячеек
+   идёт через block-OCR — риск деградации таблиц); замер с/стр vs surya 10,5.
+3. Опционально: chandra-ocr-2 (преемник surya-2, 5,3B Qwen3.5-VLM, ru 85,5%,
+   olmOCR 85,8 vs ~83,3 у surya-2) — llama.cpp уже поддерживает конверсию
+   Qwen3_5ForConditionalGeneration → GGUF под Vulkan возможен; на marker 2.0.0
+   НЕ интегрирована (свой CLI, vLLM/HF, лицензия OpenRAIL-M для коммерции).
+4. Эксперимент A: fast-режим на чистом цифровом PDF (нужен файл в inbox/,
    например ФР-2025) — USAGE §3.5.
-3. Вернуть DAMA Часть 1 (225 стр.) → полный прогон (~35 мин) → БЗ.
-4. Этап 3 плана README: локальный MinerU (`mineru-api :8000`, backend pipeline)
+5. Вернуть DAMA Часть 1 (225 стр.) → полный прогон (~35 мин) → БЗ.
+6. Этап 3 плана README: локальный MinerU (`mineru-api :8000`, backend pipeline)
    как авто-путь в CS + `local-paddleocr` для картинок.
-5. Опционально: native-замер PaddleOCR-VL прямой транскрипцией рендеров
-   (one-off llama-server, без marker) и/или адаптер-прокси — drop-in путь
-   закрыт (§3.6). GLM-OCR удалён. Ревиз issues marker/surya (2026-10-14):
-   публичных аналогов адаптации чужих OCR-моделей НЕТ (marker 1.x имел
-   OCR_ENGINE/tesseract — в 2.0 удалена); расширяемая точка marker — только
-   LLM-сервисы (--use_llm, PR #1097 litellm); грабля upstream — llama.cpp
-   свежих билдов ломает грамматику `\d` bbox-схемы (surya #542; наш билд
-   11541 работает). Адаптер, если делать — только свой.
-6. Опубликовать репозиторий (remote за пользователем).
+7. Опубликовать репозиторий (remote за пользователем).
 
 ## Грабли / примечания
 - **Баг restart исправлен** (было: `${NO_LLM:+--no-llm}` передавал флаг всегда,
@@ -85,6 +89,13 @@
   `~/.cache/datalab/surya/llamacpp_server.log`.
 - QC «таблицы не распознаны» может ложно срабатывать на текстовых выборках
   (`--pages`) — для фрагментов QC мягкий by design.
+- Ревиз issues marker/surya (2026-10-14): публичных аналогов адаптации чужих
+  OCR-моделей в marker НЕТ (marker 1.x имел OCR_ENGINE/tesseract — в 2.0
+  удалена); расширяемая точка marker — только LLM-сервисы (--use_llm,
+  PR #1097 litellm). Грабля upstream: свежие llama.cpp ломаются на `\d` в
+  bbox-паттерне грамматики guided-layout (surya #542, «Failed to parse
+  grammar», 400) — наш llama-server 0.6.0-dev build 11541 работает; при
+  апгрейде llama.cpp — учесть (проверить `[ ]`-ответ layout-запроса).
 - Кириллица QC считается СРЕДИ БУКВ; доля <55% на полном документе — сигнал
   потери текста → `--retry-ocr`.
 
