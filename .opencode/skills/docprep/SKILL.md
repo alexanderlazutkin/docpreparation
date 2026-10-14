@@ -8,7 +8,7 @@ description: Подготовка PDF к загрузке в базу знани
 ## Контекст окружения
 - Репозиторий: `~/Git/RAG/docpreparation` (uv-проект; marker-pdf в `.venv`, глобальный Python не трогать)
 - GPU: Radeon 8060S через **llama.cpp/Vulkan** (spawn `llama-server` происходит автоматически при первом обращении к surya; vLLM/ROCm не используется)
-- Веса surya-2 GGUF — локально (`/media/llm/Models/datalab-to/surya-ocr-2-gguf`, проверены байт-в-байт с HF), пути задаются в `.env` через `SURYA_GGUF_LOCAL_MODEL_PATH`/`SURYA_GGUF_LOCAL_MMPROJ_PATH`
+- Веса surya-2 GGUF — локально (`/media/llm/Models/OCR/surya-ocr-2-gguf`, проверены байт-в-байт с HF), пути задаются в `.env` через `SURYA_GGUF_LOCAL_MODEL_PATH`/`SURYA_GGUF_LOCAL_MMPROJ_PATH`
 - Исходники кладём в `inbox/`, результаты появляются в `outbox/` — оба каталога вне git
 
 ## Сервисы inference (`services.sh`)

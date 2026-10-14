@@ -1,56 +1,78 @@
-# HANDOFF: Cherry Studio 2.1.4 — анализ качества БЗ → пайплайн подготовки документов
+# HANDOFF: docpreparation — преп-пайплайн PDF → Markdown для БЗ Cherry Studio
 
-> Для продолжения в новой сессии. Осн. документ: `README.md` (план, стек, QC, автоматизация).
+> Обновлён 2026-10-14 (вечер). Осн. документы: `README.md` (план/стек),
+> `USAGE.md` (возможности/примеры/замеры/реестр требований — главный справочник).
 
-## Контекст задачи
-Пользователь (Joel) оценивал качество локального RAG Cherry Studio 2.1.4 на русскоязычных
-PDF (DAMA-DMBOK, рекомендации Банка России): таблицы, картинки, сканы, битые шрифты.
-Цель — преп-пайплайн материалов перед загрузкой в БЗ, предпочтение локальным инструментам.
+## Контекст
+Локальный RAG Cherry Studio 2.1.4 на русскоязычных PDF (DAMA-DMBOK, рекомендации ФР):
+таблицы, схемы, сканы, битые шрифты. Цель — преп-пайплайн: PDF → готовый `.md`
+(текст + таблицы + VLM-описания графики рядом) с QC-гейтом, целиком на локальном
+железе (Strix Halo, Radeon 8060S, ROCm не используется — inference через llama.cpp/Vulkan).
 
 ## Что сделано (завершено)
-1. **Анализ 2 БЗ**: `~/.config/CherryStudio/Data/KnowledgeBase/{a01dc538-…,0a2c568e-…}`.
-   Схема sqlite v2: `material→content→search_unit→search_text (FTS5 trigram) + embedding`.
-   - «DAMA-DMBOK Часть 4»: 94 862 симв., **0.00% кириллицы** — битые шрифты без ToUnicode,
-     pdf.js-конвертер потерял текст молча. Poppler из тех же страниц даёт 82.8%.
-   - «Часть 3»: склеенные таблицы, переносы не склеены, 46 мусорных чанков <100 симв.
-   - У всех чанков `title=None`, `locator=None` (нет якорей страниц).
-   - Готовые `.md` индексируются чисто (чанки 500–800 симв., 81% кириллицы) → лучший вход в БЗ.
-2. **Реверс app.asar** (`/opt/Cherry Studio/resources/app.asar`, распаковано в `/tmp/opencode/cs/full`):
-   - doc→md движки: `local-document` (anydoc; OCR-фолбэк ТОЛЬКО если страница без текста —
-     «мусорный, но непустой» проходит; лимит 300 стр.), `open-mineru` (127.0.0.1:8000/file_parse,
-     ≤200 МБ), `paddleocr`-API (PaddleOCR-VL-1.5/1.6, PP-StructureV3, ≤50 МБ/100 стр.),
-     облако: mineru/doc2x/mistral.
-   - OCR: `local-paddleocr` (ppu ONNX, PP-OCRv5/v6, в каталоге есть кириллические модели),
-     `tesseract` (нужен пакет tesseract-ocr-rus), `ovocr` (Intel NPU, en/zh).
-3. **Сравнение инструментов** (MinerU / Docling / Marker): выбрано —
-   ручной путь **Marker** + **llama.cpp** (`--use_llm` через `marker.services.openai.OpenAIService`,
-   OpenAI-совместимый endpoint llama-server); авто-путь в CS — **open-mineru + local-paddleocr**.
-4. **Написан план**: `/home/lan/Git/RAG/docpreparation/README.md` — этапы 0–6, `qc_check.py`
-   (кириллица ≥55%, лидеры оглавления, переносы, таблицы), режимы Marker по типам документов,
-   6 способов агентной автоматизации, чеклист приёмки.
+- **uv-проект** marker-pdf (глобальный Python не тронут), git-репозиторий, рабочие
+  каталоги `inbox/ outbox/ logs/` вне git.
+- **services.sh**: surya VLM (:8510, alias `datalab-to/surya-ocr-2`, p=8) +
+  LLM/VLM Qwen3.6-35B-A3B (:8080, p=2, mmproj-F32). Флаги `--llm-parallel`,
+  `--llm-model`, `--no-llm`; check --deep.
+- **Пайплайн `prepare_doc.sh`/`prepare_all.sh`/`launch_batch.sh`**: стадии
+  [1/6] marker → [2/6] captioning → [3/6] cleanup TOC → [4/6] QC → [5/6] force_ocr
+  (только `--retry-ocr`) → [6/6] готово. Resume по `.qc_pass`, `--pages "S[-E]"`,
+  `--fragments K`, ETA по `logs/timings.jsonl`, per-file логи + `batch_latest.*`.
+  Агент запускает batch ТОЛЬКО через `launch_batch.sh` (видимое окно терминала,
+  авто-закрытие 5 мин).
+- **Captioning**: локально 35B (5,4 с/фигура при `CAPTION_PARALLEL=2`) — быстрее
+  облака (Cherry free: ~19 с, plus: ~16 с); облако подключается env
+  `CAPTION_API/MODEL/PARALLEL` + ключ `CHERRY_API_KEY` (см. USAGE §2.4, §3.1).
+- **QC**: кириллица ≥55% среди букв, лидеры, переносы, таблицы. Полный документ
+  FAIL → без ретрая (только `--retry-ocr`); фрагменты — мягкий режим.
+- **Замеры производительности** (USAGE §3.5): дефолт surya p=8 оптимален
+  (10,5 с/стр); p=16 −57%; параллельные фрагменты выигрыш только при p<8.
+- **Приёмка**: «АРХИТЕКТУРА И МОДЕЛИРОВАНИЕ ДАННЫХ» (39 стр.) — полный PASS
+  (marker 440с + 3 описания + cleanup 31 лидер + QC PASS). Спот-чек таблиц
+  (текстовый + через Qwen3VL-8B/Qwen3.6-35B визуально) — без потерь.
+- **Модели перенесены**: `/media/llm/Models/datalab-to` → `/media/llm/Models/OCR`
+  (рядом с GLM-OCR, PaddleOCR-VL-1.6); пути обновлены везде, старт/стоп проверен.
+- Навык агенту: `.opencode/skills/docprep/SKILL.md`.
+
+## Текущее состояние
+- Сервисы **остановлены** (`./services.sh start` поднимет; дефолты p=8/p=2).
+- `outbox/`: готовый MD «АРХИТЕКТУРА…» (+ фигуры, `_meta.json`, `.qc_pass`).
+- `inbox/`: тот же PDF. Git: 11+ коммитов, remote НЕ настроен (публикация за пользователем).
+- `.env` не в git: пути моделей (`/media/llm/Models/OCR/...`), `CAPTION_PARALLEL=2`.
 
 ## Следующие шаги (по приоритету)
-1. Этапы 0–2 из README: `nvidia-smi`, `pip install marker-pdf`, llama.cpp + GGUF
-   (qwen2.5-7b-instruct), smoke-тест `marker_single`.
-2. «Часть 4» + `--force_ocr` → `qc_check.py` — главный приёмочный тест (кириллица >55%).
-3. `mineru-api --port 8000 --backend pipeline`; в CS: документ = open-mineru, OCR = local-paddleocr.
-4. Пересоздать БЗ `a01dc538` из свежих .md, проверить реальными поисковыми запросами.
-5. Опционально: `prepare_doc.sh` (конвертация→QC→ретрай force_ocr) + skill `docprep`.
+1. Загрузить готовый `.md` в БЗ Cherry Studio через UI; проверить реальными
+   поисковыми запросами (главный приёмочный тест всей затеи).
+2. Эксперимент A: fast-режим на чистом цифровом PDF (нужен файл в inbox/,
+   например ФР-2025) — USAGE §3.5.
+3. Вернуть DAMA Часть 1 (225 стр.) → полный прогон (~35 мин) → БЗ.
+4. Этап 3 плана README: локальный MinerU (`mineru-api :8000`, backend pipeline)
+   как авто-путь в CS + `local-paddleocr` для картинок.
+5. Опубликовать репозиторий (remote за пользователем).
 
 ## Грабли / примечания
-- `sqlite3` CLI отсутствует — читать через `python3` sqlite3; **не переиспользовать курсор
-  во вложенных циклах** (итерация обрывается).
-- asar: `npx @electron/asar extract` (распаковка в /tmp может быть вычищена — повторить).
-- У CS **нет API добавления материалов в БЗ** — только UI; файлы в `raw/` сами не индексируются.
-- `hivemind_store` падает без запущенного Ollama (нужны embeddings) — при желании повторить.
-- `/home/lan/Git/RAG` — не git-репозиторий.
-- У Chronology: версия CS подтверждена 2.1.4 (deb, version.log).
+- **Баг restart исправлен** (было: `${NO_LLM:+--no-llm}` передавал флаг всегда,
+  т.к. «0» непустое → surya не перезапускалась, LLM не поднимался). Если сервер
+  не меняет конфиг после restart — проверять `pgrep -af llama-server | grep -oE "parallel [0-9]+"`.
+- marker/surya умеет спавнить СВОЙ llama-server на случайном порту, если :8510
+  недоступен → сирота ест VRAM. Лечится: `pgrep -af llama-server`, kill лишних.
+- Терминальные окна экспериментов: без `read` без таймаута (зомби) — hold
+  только с `read -t N`.
+- llama-сервер логи: `/tmp/docprep-{surya,llm}.log`; авто-spawn surya:
+  `~/.cache/datalab/surya/llamacpp_server.log`.
+- QC «таблицы не распознаны» может ложно срабатывать на текстовых выборках
+  (`--pages`) — для фрагментов QC мягкий by design.
+- Кириллица QC считается СРЕДИ БУКВ; доля <55% на полном документе — сигнал
+  потери текста → `--retry-ocr`.
 
 ## Ключевые артефакты
 | Что | Где |
 |---|---|
-| План/заметка | `/home/lan/Git/RAG/docpreparation/README.md` |
-| Этот handoff | `/home/lan/Git/RAG/docpreparation/HANDOFF.md` |
-| Распакованный asar CS | `/tmp/opencode/cs/full` (временно) |
-| БЗ пользователя | `~/.config/CherryStudio/Data/KnowledgeBase/{a01dc538…,0a2c568e…}` |
-| QC-скрипт | инлайн в README, раздел «Этап 5» |
+| Главный справочник (возможности/замеры/реестр) | `USAGE.md` |
+| План/обоснование стека | `README.md` |
+| Сервисы / пайплайн | `services.sh`, `scripts/{launch_batch,prepare_all,prepare_doc}.sh` |
+| QC / captioning / cleanup | `scripts/{qc_check,caption_figures,clean_md}.py` |
+| Тайминги (ETA-калибровка) | `logs/timings.jsonl` |
+| Готовый MD | `outbox/Рекомендации… АРХИТЕКТУРА И МОДЕЛИРОВАНИЕ ДАННЫХ/` |
+| Навык агента | `.opencode/skills/docprep/SKILL.md` |

@@ -189,7 +189,7 @@ docpreparation/
 - GPU-инференс surya — через **llama.cpp/Vulkan**: marker сам поднимает `llama-server`
   (в логе `Vulkan0: AMD Radeon 8060S`). Путь A (docker + vLLM) **неприменим**:
   vLLM на gfx1151 официально не поддерживается; системный ROCm для marker не нужен.
-- Веса surya-2 GGUF уже локально: `/media/llm/Models/datalab-to/surya-ocr-2-gguf`
+- Веса surya-2 GGUF уже локально: `/media/llm/Models/OCR/surya-ocr-2-gguf`
   (проверены: размеры байт-в-байт с HF Hub, новее lastModified репозитория) —
   подключаются через `.env` (`SURYA_GGUF_LOCAL_MODEL_PATH` / `..._MMPROJ_PATH`), без скачивания.
 - Layout-модель fast-режима (`datalab-to/surya_layout2`) при первом fast-прогоне

@@ -22,7 +22,7 @@
 # модели на порту — ошибка (marker откажется аттачиться).
 #
 # Модели и порты (переопределяются окружением или .env):
-#   SURYA_MODEL / SURYA_MMPROJ  (деф. /media/llm/Models/datalab-to/surya-ocr-2-gguf/…)
+#   SURYA_MODEL / SURYA_MMPROJ  (деф. /media/llm/Models/OCR/surya-ocr-2-gguf/…)
 #   SURYA_PORT=8510  SURYA_PARALLEL=8  SURYA_CTX=parallel×12288
 #   LLM_MODEL (деф. /media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf)
 #   LLM_MMPROJ (деф. mmproj-F32.gguf рядом с моделью; пусто = текст-only сервис)
@@ -34,8 +34,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
 
-SURYA_MODEL="${SURYA_GGUF_LOCAL_MODEL_PATH:-/media/llm/Models/datalab-to/surya-ocr-2-gguf/surya-2.gguf}"
-SURYA_MMPROJ="${SURYA_GGUF_LOCAL_MMPROJ_PATH:-/media/llm/Models/datalab-to/surya-ocr-2-gguf/surya-2-mmproj.gguf}"
+SURYA_MODEL="${SURYA_GGUF_LOCAL_MODEL_PATH:-/media/llm/Models/OCR/surya-ocr-2-gguf/surya-2.gguf}"
+SURYA_MMPROJ="${SURYA_GGUF_LOCAL_MMPROJ_PATH:-/media/llm/Models/OCR/surya-ocr-2-gguf/surya-2-mmproj.gguf}"
 SURYA_ALIAS="datalab-to/surya-ocr-2"
 SURYA_PORT="${SURYA_PORT:-8510}"
 SURYA_PARALLEL="${SURYA_PARALLEL:-8}"
@@ -214,13 +214,13 @@ check() {
 # ------------------------------------------------------------------ main ----
 
 CMD="help"; [ $# -gt 0 ] && CMD="$1"; shift || true
-DEEP=0 NO_LLM=0 PARALLEL_GIVEN=0
+DEEP=0 NO_LLM=0 PARALLEL_GIVEN=0 MODEL_GIVEN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1; shift ;;
     --no-llm) NO_LLM=1; shift ;;
-    --llm-model) LLM_MODEL="${2:?--llm-model требует значение}"; shift 2 ;;
-    --llm-model=*) LLM_MODEL="${1#*=}"; shift ;;
+    --llm-model) LLM_MODEL="${2:?--llm-model требует значение}"; MODEL_GIVEN=1; shift 2 ;;
+    --llm-model=*) LLM_MODEL="${1#*=}"; MODEL_GIVEN=1; shift ;;
     --llm-parallel) LLM_PARALLEL="${2:?--llm-parallel требует значение}"; PARALLEL_GIVEN=1; shift 2 ;;
     --llm-parallel=*) LLM_PARALLEL="${1#*=}"; PARALLEL_GIVEN=1; shift ;;
     *) die "неизвестный аргумент: $1 (см. ./services.sh help)" ;;
@@ -242,9 +242,11 @@ case "$CMD" in
     ;;
   restart)
     echo "== Restart =="
-    "$0" stop ${NO_LLM:+--no-llm}; "$0" start ${NO_LLM:+--no-llm} \
-        ${LLM_MODEL:+--llm-model "$LLM_MODEL"} \
-        ${PARALLEL_GIVEN:+--llm-parallel "$LLM_PARALLEL"}
+    NL=""; [ "$NO_LLM" = 1 ] && NL="--no-llm"
+    LM=""; [ "$MODEL_GIVEN" = 1 ] && LM="--llm-model $LLM_MODEL"
+    LP=""; [ "$PARALLEL_GIVEN" = 1 ] && LP="--llm-parallel $LLM_PARALLEL"
+    "$0" stop $NL
+    "$0" start $NL $LM $LP
     ;;
   check|status) check ;;
   help|-h|--help|*)

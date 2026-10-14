@@ -8,7 +8,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARGS="${*:-}"
-HOLD="echo; echo 'Обработка завершена. Enter — закрыть окно'; read -r _"
+HOLD="echo; echo 'Обработка завершена. Окно закроется само через 5 мин (или Enter)'; read -t 300 -r _ || true"
 CMD="cd '$ROOT' && scripts/prepare_all.sh $ARGS; rc=\$?; $HOLD; exit \$rc"
 
 if command -v gnome-terminal >/dev/null 2>&1; then
