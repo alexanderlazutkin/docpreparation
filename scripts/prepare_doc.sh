@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 # PDF -> Markdown: [1/5] marker (balanced) -> [2/5] captioning -> [3/5] QC
-#   -> [4/5] ретрай --force_ocr (при FAIL; для фрагментов QC мягкий, без ретрая)
-#   -> [5/5] готово + запись тайминга в logs/timings.jsonl.
+#   -> [4/5] ретрай --force_ocr (ТОЛЬКО с флагом --retry-ocr; для фрагментов
+#   QC всегда мягкий) -> [5/5] готово + запись тайминга в logs/timings.jsonl.
 # Диапазон: --pages "S[-E]" (1-индекс; без E или E=0 — до конца документа).
 #   Фрагмент пишется в outbox/<имя>__pS-E/ (полный документ — в outbox/<имя>/).
 # Статус: outbox/<...>/.status; успех: .qc_pass (resume); --force — переобработка.
 # Captioning: локальный LLM-сервис (services.sh) или облако через env
 #   CAPTION_API/CAPTION_MODEL/CAPTION_API_KEY (см. .env.example).
-# Usage: prepare_doc.sh [--force] [--pages "S[-E]"] <file.pdf> [флаги marker_single]
+# Usage: prepare_doc.sh [--force] [--retry-ocr] [--pages "S[-E]"] <file.pdf> [флаги marker_single]
 set -euo pipefail
 
-FORCE=0 PAGES=""
+FORCE=0 PAGES="" RETRY_OCR="${RETRY_OCR:-0}"
 while :; do
     case "${1:-}" in
         --force) FORCE=1; shift ;;
         --pages) PAGES="${2:?--pages требует значение}"; shift 2 ;;
+        --retry-ocr) RETRY_OCR=1; shift ;;
         *) break ;;
     esac
 done
@@ -113,9 +114,9 @@ stage 3/5 "QC"
 if ! qc; then
     QCRC=1
     if [ "$QC_SOFT" = 1 ]; then
-        echo "[--] QC FAIL — мягкий режим фрагмента, без force_ocr-ретрая"
-    else
-        stage 4/5 "QC FAIL -> ретрай --force_ocr"
+        echo "[--] QC FAIL — мягкий режим фрагмента, без ретрая"
+    elif [ "$RETRY_OCR" = 1 ]; then
+        stage 4/5 "QC FAIL -> ретрай --force_ocr (--retry-ocr)"
         rm -rf "$DIR" "$TMP"
         mkdir -p "$TMP"
         local_tm0=$SECONDS
@@ -132,6 +133,9 @@ if ! qc; then
         stage 3/5 "QC (после force_ocr)"
         qc || { echo "[FAIL] $STEM: QC FAIL даже после force_ocr -> $MD"; exit 1; }
         QCRC=0
+    else
+        echo "[FAIL] $STEM: QC FAIL; ретрай force_ocr отключён по умолчанию (запускай с --retry-ocr) -> $MD"
+        exit 1
     fi
 fi
 

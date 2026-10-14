@@ -6,6 +6,7 @@
 #   --pages "S[-E]"   начальная страница S (деф. 1), конечная E (деф. 0 = до конца)
 #   --fragments K     диапазон делится на K фрагментов, обрабатываемых поочерёдно
 #                     (деф. 1); каждый — свой каталог outbox/<имя>__pS-E/
+#   --retry-ocr       при QC FAIL выполнять ретрай --force_ocr (по умолчанию ВЫКЛ)
 #
 # Прогресс: стадии [k/5] по каждому файлу/фрагменту + ETA по logs/timings.jsonl
 # (медиана с/страницу; при пустой истории — сид 8.4 с/стр, 0.5 с/стр caption).
@@ -16,12 +17,13 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-FORCE="" PAGES="" FRAGS=1
+FORCE="" PAGES="" FRAGS=1 RETRY=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --force) FORCE="--force"; shift ;;
         --pages) PAGES="${2:?--pages требует значение}"; shift 2 ;;
         --fragments) FRAGS="${2:?--fragments требует значение}"; shift 2 ;;
+        --retry-ocr) RETRY="--retry-ocr"; shift ;;
         *) echo "неизвестный аргумент: $1"; exit 2 ;;
     esac
 done
@@ -65,7 +67,8 @@ N=${#FILES[@]}
 
 echo "== Batch: $N файл(ов), $(date '+%Y-%m-%d %H:%M:%S'), лог: $BATCH_LOG =="
 echo "== ETA-скорости: marker ${R_MARK} с/стр, caption ${R_CAP} с/стр (${ETA_SRC}) =="
-echo "== Диапазон: ${PAGES:-весь документ}; фрагментов: ${FRAGS} =="
+RS="выкл"; [ -n "$RETRY" ] && RS="вкл"
+echo "== Диапазон: ${PAGES:-весь документ}; фрагментов: ${FRAGS}; retry-ocr: $RS =="
 
 ROWS=()
 k=0; fails=0
@@ -110,7 +113,7 @@ for f in "${FILES[@]}"; do
         t0=$SECONDS
         PA=(--pages "$rng")                       # фрагмент всегда с диапазоном
         [ "$K" -le 1 ] && [ -z "$PAGES" ] && PA=()  # полный документ без --pages
-        if scripts/prepare_doc.sh $FORCE ${PA[@]+"${PA[@]}"} "$f" 2>&1 | tee "logs/$stem.log"; then
+        if scripts/prepare_doc.sh $FORCE $RETRY ${PA[@]+"${PA[@]}"} "$f" 2>&1 | tee "logs/$stem.log"; then
             ROWS+=("PASS|$stem|$j/$K|$((SECONDS-t0))")
         else
             ROWS+=("FAIL|$stem|$j/$K|$((SECONDS-t0))"); fails=$((fails+1))
