@@ -166,6 +166,9 @@ OpenAI-совместимый эндпоинт** (`--llm_service marker.services
 
 ## 8. Реализованная структура репозитория
 
+> Возможности с примерами запуска, рекомендации с замерами и **реестр
+> требований → функционал** — в [USAGE.md](USAGE.md).
+
 ```
 docpreparation/
 ├── pyproject.toml + uv.lock        # uv-проект, marker-pdf (uv sync; .venv вне git)
