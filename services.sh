@@ -10,9 +10,11 @@
 #      32.7 ГБ; склейка кросс-страничных таблиц, постправка, чтение схем).
 #
 # Usage:
-#   ./services.sh start [--no-llm] [--llm-model PATH]   # surya (+ LLM, если не --no-llm)
-#   ./services.sh stop  [--no-llm]                       # остановка только своих сервисов
-#   ./services.sh restart [--no-llm] [--llm-model PATH]
+#   ./services.sh start [--no-llm] [--llm-model PATH] [--llm-parallel N]   # N деф. 2
+#                                       # surya (+ LLM, если не --no-llm);
+#                                       # --llm-parallel — слоты LLM-сервера
+#   ./services.sh stop [--no-llm]                       # остановка только своих сервисов
+#   ./services.sh restart [--no-llm] [--llm-model PATH] [--llm-parallel N]
 #   ./services.sh check [--deep]                         # статус; --deep = проба генерации
 #
 # Сервис считается «своим», если запущен этим скриптом (pid-файл). Чужой
@@ -212,21 +214,19 @@ check() {
 # ------------------------------------------------------------------ main ----
 
 CMD="help"; [ $# -gt 0 ] && CMD="$1"; shift || true
-DEEP=0 NO_LLM=0
-for arg in "$@"; do
-  case "$arg" in
-    --deep) DEEP=1 ;;
-    --no-llm) NO_LLM=1 ;;
-    --llm-model) : ;; # значение разберём ниже
-    *) die "неизвестный аргумент: $arg (см. ./services.sh help)" ;;
+DEEP=0 NO_LLM=0 PARALLEL_GIVEN=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --deep) DEEP=1; shift ;;
+    --no-llm) NO_LLM=1; shift ;;
+    --llm-model) LLM_MODEL="${2:?--llm-model требует значение}"; shift 2 ;;
+    --llm-model=*) LLM_MODEL="${1#*=}"; shift ;;
+    --llm-parallel) LLM_PARALLEL="${2:?--llm-parallel требует значение}"; PARALLEL_GIVEN=1; shift 2 ;;
+    --llm-parallel=*) LLM_PARALLEL="${1#*=}"; PARALLEL_GIVEN=1; shift ;;
+    *) die "неизвестный аргумент: $1 (см. ./services.sh help)" ;;
   esac
 done
-# --llm-model PATH (отдельно, т.к. принимает значение)
-Prev=""
-for arg in "$@"; do
-  if [ "$Prev" = "--llm-model" ]; then LLM_MODEL="$arg"; fi
-  Prev="$arg"
-done
+[ "${LLM_PARALLEL:-2}" -ge 1 ] 2>/dev/null || die "--llm-parallel: ожидается целое >= 1"
 
 case "$CMD" in
   start)
@@ -242,7 +242,9 @@ case "$CMD" in
     ;;
   restart)
     echo "== Restart =="
-    "$0" stop ${NO_LLM:+--no-llm}; "$0" start ${NO_LLM:+--no-llm} ${LLM_MODEL:+--llm-model "$LLM_MODEL"}
+    "$0" stop ${NO_LLM:+--no-llm}; "$0" start ${NO_LLM:+--no-llm} \
+        ${LLM_MODEL:+--llm-model "$LLM_MODEL"} \
+        ${PARALLEL_GIVEN:+--llm-parallel "$LLM_PARALLEL"}
     ;;
   check|status) check ;;
   help|-h|--help|*)
