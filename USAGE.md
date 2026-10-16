@@ -46,7 +46,8 @@ scripts/launch_batch.sh              # 3) обработка (откроется
 |---|---|
 | `scripts/launch_batch.sh` | все файлы inbox/ целиком |
 | `scripts/launch_batch.sh --pages "1-10"` | тестовая выборка первых 10 стр. каждого файла |
-| `scripts/launch_batch.sh --fragments 4` | большой файл поочерёдно 4 кусками (каждый — свой каталог `outbox/<имя>__pS-E/` и свой resume); **при K>1 куски автоматически склеиваются** в один `.md` без потерь: все части входят посимвольно, ссылки на картинки целы, `_meta.json` объединяется, мягкий QC + `.qc_pass` (скрипт `scripts/merge_fragments.py`, selftest `--selftest`) |
+| `scripts/launch_batch.sh --fragments 4` | большой файл поочерёдно 4 кусками (каждый — свой каталог `outbox/<имя>__pS-E/` и свой resume); **при K>1 куски автоматически склеиваются** в один `.md` без потерь: все части входят посимвольно, ссылки на картинки целы, `_meta.json` объединяется, мягкий QC + `.qc_pass` (скрипт `scripts/merge_fragments.py`, selftest `--selftest`); после успешной склейки каталоги фрагментов **удаляются** (деф.) |
+| `scripts/launch_batch.sh --fragments 3 --debug` | то же, но фрагменты сохраняются для ручной проверки склейки (деф. debug=false — удалять; параметр зарезервирован под доп. отладочный функционал) |
 | `scripts/launch_batch.sh --retry-ocr` | при QC FAIL ретрай `--force_ocr` (по умолчанию ВЫКЛ) |
 | `scripts/launch_batch.sh --force` | переобработать даже готовое |
 | `CAPTION_FIGURES=0 scripts/launch_batch.sh` | без captioning (быстрый прогон) |
