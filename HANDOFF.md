@@ -1,6 +1,6 @@
 # HANDOFF: docpreparation — преп-пайплайн PDF → Markdown для БЗ Cherry Studio
 
-> Обновлён 2026-10-14 (вечер). Осн. документы: `README.md` (план/стек),
+> Обновлён 2026-10-16. Осн. документы: `README.md` (план/стек),
 > `USAGE.md` (возможности/примеры/замеры/реестр требований — главный справочник).
 
 ## Контекст
@@ -47,32 +47,49 @@
   OCR-VLM за алиасом). Тестовые выходы: `outbox/ocrtests/` (вне git).
   Грабли: `restart --no-llm` НЕ перезапускает surya (stop с --no-llm её не
   трогает) — для смены --surya-* флагов делать явный `stop` → `start`.
+- **Адаптер-прокси PaddleOCR-VL → marker (2026-10-16, бедка `cell--ll3um`) —
+  реализован и принят**: `scripts/ocr_proxy.py` (OpenAI-прокси :8511, алиас
+  surya; роутинг: layout/table_rec/full-page → surya :8510, block-OCR →
+  Paddle :8512 с `<|ocr|>` и `<p>`-обёрткой; selftest `--test` — 27 проверок),
+  `services.sh start --ocr-proxy` (+Paddle-сервис, check/stop/restart),
+  `prepare_doc.sh` аттачится к прокси автоматически. Приёмка: полный PDF
+  39 стр. — QC PASS (cyr 97,1%), дифф с эталоном косметический, но block-OCR
+  в balanced не вызывается (таблицы берутся из full-page/pdftext) → прокси как
+  pass-through. A/B block-OCR (`scripts/ab_block_ocr.py`,
+  `outbox/ocrtests/adapter_ab/`): Paddle 3–5× быстрее surya при равной
+  кириллице, на тяжёлой таблице устойчивее (у surya repetition-loop).
+  Итог: `--ocr-proxy` — опциональный режим (не дефолт), выигрыш когда таблицы
+  массово падают в OCR-fallback. Полные детали — USAGE §3.6 аддендум-2.
 - Навык агенту: `.opencode/skills/docprep/SKILL.md`.
 
 ## Текущее состояние
-- Сервисы **остановлены** (`./services.sh start` поднимет; дефолты p=8/p=2).
-- `outbox/`: готовый MD «АРХИТЕКТУРА…» (+ фигуры, `_meta.json`, `.qc_pass`).
-- `inbox/`: тот же PDF. Git: 11+ коммитов, remote НЕ настроен (публикация за пользователем).
+- Сервисы **остановлены** (`./services.sh start` поднимет; дефолт p=8/p=2;
+  гибридный OCR — `start --ocr-proxy`, см. §3.6 аддендум-2).
+- `outbox/`: готовый MD «АРХИТЕКТУРА…» (+ фигуры, `_meta.json`, `.qc_pass`);
+  артефакты A/B адаптера — `outbox/ocrtests/adapter_ab/` (вне git).
+- `inbox/`: тот же PDF. Git: remote НЕ настроен (публикация за пользователем).
 - `.env` не в git: пути моделей (`/media/llm/Models/OCR/...`), `CAPTION_PARALLEL=2`.
 
 ## Следующие шаги (по приоритету)
 1. Загрузить готовый `.md` в БЗ Cherry Studio через UI; проверить реальными
    поисковыми запросами (главный приёмочный тест всей затеи).
-2. **Адаптер-прокси PaddleOCR-VL → marker** (запланированная задача, bd-бедка):
-   OpenAI-совместимый прокси (~100–200 строк) держит алиас
-   `datalab-to/surya-ocr-2` (на него указывает SURYA_INFERENCE_URL); роутинг по
-   промпту: layout/table_rec/high_accuracy_bbox → surya-2 (:8510) как есть;
-   block-OCR («OCR this block image to HTML.») → Paddle (:8512) с заменой
-   промпта на `<|ocr|>` и обёрткой plain-text ответа в `<p>…</p>` HTML.
-   Требует: /v1/models с алиасом, /health, t=0; smoke на таблицах (текст ячеек
-   идёт через block-OCR — риск деградации таблиц); замер с/стр vs surya 10,5.
+2. **Склейка фрагментов после обработки** (требование 2026-10-16, бедка
+   `cell--ll3um-mvapljefi2y`): при
+   `--fragments K` после обработки всех частей — объединить их в один `.md`
+   без потери информации: ссылки/якоря фигур (относительные пути, нумерация
+   `*_md_prefix.md` → единый файл + общая папка figures), заголовки/TOC,
+   метаданные `_meta.json`. Нужна проверка: QC на склеенном файле + диф-чек
+   что все части вошли (размер/строки, ссылки целевые). Сейчас фрагменты
+   остаются раздельными выходами с мягким QC.
 3. Опционально: chandra-ocr-2 (преемник surya-2, 5,3B Qwen3.5-VLM, ru 85,5%,
    olmOCR 85,8 vs ~83,3 у surya-2) — llama.cpp уже поддерживает конверсию
    Qwen3_5ForConditionalGeneration → GGUF под Vulkan возможен; на marker 2.0.0
    НЕ интегрирована (свой CLI, vLLM/HF, лицензия OpenRAIL-M для коммерции).
+   Альтернатива-конкурент адаптеру: замена surya целиком (включая layout).
 4. Эксперимент A: fast-режим на чистом цифровом PDF (нужен файл в inbox/,
    например ФР-2025) — USAGE §3.5.
-5. Вернуть DAMA Часть 1 (225 стр.) → полный прогон (~35 мин) → БЗ.
+5. Вернуть DAMA Часть 1 (225 стр.) → полный прогон (~35 мин) → БЗ
+   (использовать фрагменты + склейку из п.2).
 6. Этап 3 плана README: локальный MinerU (`mineru-api :8000`, backend pipeline)
    как авто-путь в CS + `local-paddleocr` для картинок.
 7. Опубликовать репозиторий (remote за пользователем).
@@ -98,6 +115,10 @@
   апгрейде llama.cpp — учесть (проверить `[ ]`-ответ layout-запроса).
 - Кириллица QC считается СРЕДИ БУКВ; доля <55% на полном документе — сигнал
   потери текста → `--retry-ocr`.
+- `--ocr-proxy` (адаптер): в balanced block-OCR вызывается только в
+  table-fallback (таблицы с битыми шрифтами), формулы и fast-mode хирургия —
+  на чистом цифровом PDF Paddle простаивает, прокси работает как pass-through
+  (§3.6 аддендум-2). Для смены набора сервисов: явный `stop` → `start`.
 
 ## Ключевые артефакты
 | Что | Где |
@@ -106,6 +127,7 @@
 | План/обоснование стека | `README.md` |
 | Сервисы / пайплайн | `services.sh`, `scripts/{launch_batch,prepare_all,prepare_doc}.sh` |
 | QC / captioning / cleanup | `scripts/{qc_check,caption_figures,clean_md}.py` |
+| OCR-прокси (гибрид surya+Paddle) + A/B | `scripts/ocr_proxy.py`, `scripts/ab_block_ocr.py` |
 | Тайминги (ETA-калибровка) | `logs/timings.jsonl` |
 | Готовый MD | `outbox/Рекомендации… АРХИТЕКТУРА И МОДЕЛИРОВАНИЕ ДАННЫХ/` |
 | Навык агента | `.opencode/skills/docprep/SKILL.md` |

@@ -23,11 +23,19 @@ done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
 
-# Аттач к постоянному surya-серверу (services.sh start), если поднят
+# Аттач к OCR-стеку (services.sh): если поднят прокси-адаптер (--ocr-proxy) —
+# цепляемся к нему (layout/table_rec→surya, block-OCR→PaddleOCR-VL); иначе к
+# постоянному surya-серверу напрямую.
 SURYA_PORT="${SURYA_PORT:-8510}"
-if [ -z "${SURYA_INFERENCE_URL:-}" ] && curl -sf -m 2 "http://127.0.0.1:$SURYA_PORT/v1/models" >/dev/null 2>&1; then
-    export SURYA_INFERENCE_URL="http://127.0.0.1:$SURYA_PORT/v1"
-    echo "[--] аттач к постоянному surya-серверу :$SURYA_PORT"
+OCR_PROXY_PORT="${OCR_PROXY_PORT:-8511}"
+if [ -z "${SURYA_INFERENCE_URL:-}" ]; then
+    if curl -sf -m 2 "http://127.0.0.1:$OCR_PROXY_PORT/health" >/dev/null 2>&1; then
+        export SURYA_INFERENCE_URL="http://127.0.0.1:$OCR_PROXY_PORT/v1"
+        echo "[--] аттач к OCR-прокси :$OCR_PROXY_PORT (block-OCR -> PaddleOCR-VL)"
+    elif curl -sf -m 2 "http://127.0.0.1:$SURYA_PORT/v1/models" >/dev/null 2>&1; then
+        export SURYA_INFERENCE_URL="http://127.0.0.1:$SURYA_PORT/v1"
+        echo "[--] аттач к постоянному surya-серверу :$SURYA_PORT"
+    fi
 fi
 
 IN="${1:?usage: prepare_doc.sh [--force] [--pages S[-E]] <file.pdf> [marker flags...]}"
