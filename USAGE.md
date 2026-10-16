@@ -236,7 +236,7 @@ block-OCR («OCR this block image to HTML.») → Paddle с промптом `<|
 |---|---|
 | Чистый цифровой PDF | обычный запуск (balanced); для скорости — `CAPTION_FIGURES=0` или fast-режим marker |
 | Битые шрифты (кириллица ≈ 0%) | `--retry-ocr` сразу |
-| Скан | обычный запуск (auto full-page OCR) |
+| Скан | обычный запуск (auto full-page OCR); замер: Data Model Resource Book Vol.2 (чистый скан, 300 dpi, англ.) — **40,7 с/стр** full-page surya, таблицы 11/11, адаптер pass-through |
 | Кросс-страничные таблицы, формы | + `--use_llm` (флаги из `services.sh check`) |
 | Тест сложного места | `--pages "N-M"` |
 
