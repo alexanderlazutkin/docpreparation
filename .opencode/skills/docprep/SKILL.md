@@ -13,18 +13,26 @@ description: Подготовка PDF к загрузке в базу знани
 
 ## Сервисы inference (`services.sh`)
 ```bash
-./services.sh start            # surya VLM :8510 + LLM/VLM :8080 (Qwen3.6-35B-A3B + mmproj-F32, 32.7 ГБ)
-./services.sh check --deep     # статус + проба генерации
-./services.sh stop             # остановить свои (чужой llama-server не трогает)
+./services.sh start --ocr-proxy # РЕКОМЕНДУЕТСЯ: surya :8510 + Paddle :8512 + прокси :8511
+                                 # + LLM/VLM :8080 (Qwen3.6-35B-A3B + mmproj-F32, 32,7 ГБ)
+./services.sh check --deep      # статус + проба генерации
+./services.sh stop              # остановить свои (чужой llama-server не трогает)
 ```
-- `prepare_doc.sh` сам аттачится к поднятому surya (SURYA_INFERENCE_URL) и запускает
+- `--ocr-proxy` — гибридный OCR: marker аттачится к прокси :8511, layout/
+  table_rec/full-page идут на surya, block-OCR (таблицы-fallback, формулы) — на
+  PaddleOCR-VL (§3.6 аддендум-2 в USAGE). Роутинг автоматический по содержимому,
+  флаг безопасен на любом PDF; без флага — обычный режим (только surya),
+  отдельного `--no-ocr-proxy` нет. Статистика маршрутов: `curl :8511/stats`.
+- `prepare_doc.sh` сам аттачится к OCR-стеку (прокси :8511 приоритетнее surya
+  :8510) и запускает
   **captioning фигур** через LLM-сервис (VLM-описания после каждой картинки — графика
   становится находимой в текстовом RAG; Cherry Studio сами картинки не индексирует).
   Без поднятого LLM-сервиса captioning тихо пропускается; отключение — `CAPTION_FIGURES=0`.
 - Для `--use_llm` брать модель/URL из вывода `services.sh check` (строка с флагами marker).
 
 ## Базовый цикл (начинать всегда с него)
-1. `./services.sh start` — модели на GPU (surya :8510 + Qwen3.6-35B :8080).
+1. `./services.sh start --ocr-proxy` — модели на GPU (surya + Paddle/прокси +
+   Qwen3.6-35B :8080).
 2. Исходники в `inbox/`.
 3. Запуск обработки — **только через `scripts/launch_batch.sh [флаги]`**: агент открывает
    пользователю видимое окно терминала с `prepare_all.sh`. НЕ запускать batch в фоне без окна.

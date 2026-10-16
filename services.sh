@@ -13,10 +13,14 @@
 #   ./services.sh start [--no-llm] [--llm-model PATH] [--llm-parallel N]   # N деф. 2
 #                                       # surya (+ LLM, если не --no-llm);
 #                                       # --llm-parallel — слоты LLM-сервера
-#   ./services.sh start [--ocr-proxy]   # + PaddleOCR-VL (:8512) и прокси-адаптер
-#                                       # (:8511, scripts/ocr_proxy.py): marker
-#                                       # аттачится к прокси — layout/table_rec
+#   ./services.sh start [--ocr-proxy]   # РЕКОМЕНДУЕТСЯ: + PaddleOCR-VL (:8512)
+#                                       # и прокси-адаптер (:8511,
+#                                       # scripts/ocr_proxy.py): marker аттачится
+#                                       # к прокси — layout/table_rec/full-page
 #                                       # идёт на surya, block-OCR на Paddle
+#                                       # (авто-роутинг по содержимому, §3.6-2;
+#                                       # отдельного --no-ocr-proxy нет: флаг
+#                                       # не указан — не поднимется)
 #   ./services.sh start [--surya-model PATH] [--surya-mmproj PATH]
 #                       [--surya-parallel N]          # подмена OCR-VLM за алиасом
 #                                       # datalab-to/surya-ocr-2 (тест GLM-OCR,
