@@ -49,20 +49,18 @@
   трогает) — для смены --surya-* флагов делать явный `stop` → `start`.
 - **Адаптер-прокси PaddleOCR-VL → marker (2026-10-16, бедка `cell--ll3um`) —
   реализован и принят**: `scripts/ocr_proxy.py` (OpenAI-прокси :8511, алиас
-  surya; роутинг: layout/table_rec/full-page → surya :8510, block-OCR →
-  Paddle :8512 с `<|ocr|>` и `<p>`-обёрткой; selftest `--test` — 27 проверок),
-  `services.sh start --ocr-proxy` (+Paddle-сервис, check/stop/restart),
-  `prepare_doc.sh` аттачится к прокси автоматически. Приёмка: полный PDF
-  39 стр. — QC PASS (cyr 97,1%), дифф с эталоном косметический, но block-OCR
-  в balanced не вызывается (таблицы берутся из full-page/pdftext) → прокси как
-  pass-through. A/B block-OCR (`scripts/ab_block_ocr.py`,
+  surya; selftest `--test`), `services.sh start --ocr-proxy` (+Paddle-сервис,
+  check/stop/restart), `prepare_doc.sh` аттачится к прокси автоматически.
+  Приёмка: полный PDF 39 стр. — QC PASS (cyr 97,1%), дифф с эталоном
+  косметический. A/B block-OCR (`scripts/ab_block_ocr.py`,
   `outbox/ocrtests/adapter_ab/`): Paddle 3–5× быстрее surya при равной
   кириллице, на тяжёлой таблице устойчивее (у surya repetition-loop).
-  Итог: `--ocr-proxy` — опциональный режим (не дефолт), выигрыш когда таблицы
-  массово падают в OCR-fallback. **Рекомендация (2026-10-16): стартовать всегда
-  с `--ocr-proxy`** — роутинг автоматический по содержимому, флаг безопасен на
-  любом PDF (на чистых Paddle простаивает); `--no-ocr-proxy` не вводился:
-  флаг не указан — адаптер не поднимается. Полные детали — USAGE §3.6 аддендум-2.
+  **Но на DMRB Vol.1 (стр. 161–170) первый же реальный block-OCR (table-fallback
+  Table 4.19) показал: Paddle отдаёт plain без `<table>` → таблица теряна.**
+  → дефолт `OCR_PROXY_BLOCK_ENGINE=surya` (чистый pass-through, безопасно),
+  Paddle — опция для экспериментов. **Рекомендация: стартовать всегда с
+  `--ocr-proxy`**; `--no-ocr-proxy` не вводился. Полные детали — USAGE §3.6
+  аддендум-2/3/4.
 - Навык агенту: `.opencode/skills/docprep/SKILL.md`.
 
 ## Текущее состояние

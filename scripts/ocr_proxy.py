@@ -40,10 +40,14 @@ PADDLE_MODEL = os.environ.get("PADDLE_ALIAS", "PaddleOCR-VL-1.6")
 HOST = os.environ.get("OCR_PROXY_HOST", "127.0.0.1")
 UPSTREAM_TIMEOUT = float(os.environ.get("OCR_PROXY_TIMEOUT", "600"))
 PADDLE_PROMPT = "<|ocr|>"
+# Движок для block-OCR (единственный реальный потребитель в balanced marker —
+# table-fallback, которому нужен <table>-HTML; Paddle даёт plain-строки →
+# clean_table_html отклоняет → таблица теряется, замерено на DMRB Vol.1
+# стр. 162, 2026-10-16). Дефолт surya = чистый pass-through; Paddle включается
+# явно: OCR_PROXY_BLOCK_ENGINE=paddle (эксперименты, §3.6 USAGE).
+BLOCK_ENGINE = os.environ.get("OCR_PROXY_BLOCK_ENGINE", "surya").lower()
 
-# Контракт surya (surya/inference/prompts.py) — единственный промпт, который
-# уходит на Paddle; всё остальное (layout, table_rec, high_accuracy_bbox и
-# любые неизвестные) — на surya-2, safe default.
+# Контракт surya (surya/inference/prompts.py) — промпт block-OCR.
 BLOCK_PROMPT = "OCR this block image to HTML."
 
 STATS = {"surya": 0, "paddle": 0, "surya_err": 0, "paddle_err": 0}
@@ -55,7 +59,8 @@ def log(msg: str) -> None:
 
 
 def route_prompt(prompt: str | None) -> str:
-    return "paddle" if prompt == BLOCK_PROMPT else "surya"
+    """block-OCR → BLOCK_ENGINE (деф. surya); остальное → surya (safe default)."""
+    return BLOCK_ENGINE if prompt == BLOCK_PROMPT else "surya"
 
 
 def extract_prompt(messages: list) -> str | None:
@@ -229,10 +234,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
 def main() -> None:
     if "--test" in sys.argv:
         sys.exit(run_selftest())
+    global BLOCK_ENGINE
+    if BLOCK_ENGINE not in ("surya", "paddle"):
+        sys.exit(
+            f"OCR_PROXY_BLOCK_ENGINE: ожидается surya|paddle, получено '{BLOCK_ENGINE}'"
+        )
     server = ThreadingHTTPServer((HOST, PROXY_PORT), ProxyHandler)
     server.daemon_threads = True
     log(
-        f"ocr-proxy :{PROXY_PORT} (alias '{ALIAS}'): surya={SURYA_URL}, paddle={PADDLE_URL}"
+        f"ocr-proxy :{PROXY_PORT} (alias '{ALIAS}'): surya={SURYA_URL}, "
+        f"paddle={PADDLE_URL}, block-OCR -> {BLOCK_ENGINE}"
     )
     try:
         server.serve_forever()
@@ -254,8 +265,18 @@ def run_selftest() -> int:
         if not cond:
             failures.append(name)
 
-    # 1. Маршрутизация по промпту
-    check("block prompt -> paddle", route_prompt(BLOCK_PROMPT) == "paddle")
+    # 1. Маршрутизация по промпту (деф. BLOCK_ENGINE=surya — pass-through)
+    check(
+        "block prompt -> block-engine (деф. surya)",
+        route_prompt(BLOCK_PROMPT) == "surya",
+    )
+    global BLOCK_ENGINE
+    BLOCK_ENGINE = "paddle"
+    check(
+        "block prompt -> paddle при OCR_PROXY_BLOCK_ENGINE=paddle",
+        route_prompt(BLOCK_PROMPT) == "paddle",
+    )
+    BLOCK_ENGINE = "surya"
     check(
         "layout prompt -> surya",
         route_prompt("Output the layout of this image as JSON.") == "surya",
@@ -435,7 +456,13 @@ def run_selftest() -> int:
 
     code, content = chat(BLOCK_PROMPT)
     check(
-        "e2e: block -> paddle, <p>-обёртка",
+        "e2e: block (деф.) -> surya насквозь", code == 200 and content == "МОК-LAYOUT"
+    )
+
+    BLOCK_ENGINE = "paddle"
+    code, content = chat(BLOCK_PROMPT)
+    check(
+        "e2e: block (paddle) -> <p>-обёртка",
         code == 200 and content == "<p>ПОДДЕРЖКА &lt;|ocr|&gt;</p>",
     )
 

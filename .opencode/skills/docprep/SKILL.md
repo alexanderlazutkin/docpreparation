@@ -18,9 +18,11 @@ description: Подготовка PDF к загрузке в базу знани
 ./services.sh check --deep      # статус + проба генерации
 ./services.sh stop              # остановить свои (чужой llama-server не трогает)
 ```
-- `--ocr-proxy` — гибридный OCR: marker аттачится к прокси :8511, layout/
-  table_rec/full-page идут на surya, block-OCR (таблицы-fallback, формулы) — на
-  PaddleOCR-VL (§3.6 аддендум-2 в USAGE). Роутинг автоматический по содержимому,
+- `--ocr-proxy` — OCR-стек с прокси-адаптером: marker аттачится к прокси :8511,
+  все пути идут на surya (прозрачный pass-through), PaddleOCR-VL (:8512) поднят
+  рядом. block-OCR на Paddle — только экспериментально через
+  `OCR_PROXY_BLOCK_ENGINE=paddle` (ломает table-fallback: Paddle даёт plain
+  без <table>, аддендум-4 USAGE). Роутинг автоматический по содержимому,
   флаг безопасен на любом PDF; без флага — обычный режим (только surya),
   отдельного `--no-ocr-proxy` нет. Статистика маршрутов: `curl :8511/stats`.
 - `prepare_doc.sh` сам аттачится к OCR-стеку (прокси :8511 приоритетнее surya

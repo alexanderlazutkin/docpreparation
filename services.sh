@@ -16,11 +16,12 @@
 #   ./services.sh start [--ocr-proxy]   # РЕКОМЕНДУЕТСЯ: + PaddleOCR-VL (:8512)
 #                                       # и прокси-адаптер (:8511,
 #                                       # scripts/ocr_proxy.py): marker аттачится
-#                                       # к прокси — layout/table_rec/full-page
-#                                       # идёт на surya, block-OCR на Paddle
-#                                       # (авто-роутинг по содержимому, §3.6-2;
-#                                       # отдельного --no-ocr-proxy нет: флаг
-#                                       # не указан — не поднимется)
+#                                       # к прокси; все пути идут на surya
+#                                       # (прозрачный pass-through), Paddle поднят
+#                                       # рядом; block-OCR на Paddle — только
+#                                       # через OCR_PROXY_BLOCK_ENGINE=paddle
+#                                       # (эксперимент, §3.6-4; флаг не указан —
+#                                       # адаптер не поднимается)
 #   ./services.sh start [--surya-model PATH] [--surya-mmproj PATH]
 #                       [--surya-parallel N]          # подмена OCR-VLM за алиасом
 #                                       # datalab-to/surya-ocr-2 (тест GLM-OCR,
@@ -208,6 +209,7 @@ start_proxy() {
   : > "$PROXY_LOG"
   setsid env SURYA_URL="http://$HOST:$SURYA_PORT" PADDLE_URL="http://$HOST:$PADDLE_PORT" \
     OCR_PROXY_PORT="$OCR_PROXY_PORT" SURYA_ALIAS="$SURYA_ALIAS" PADDLE_ALIAS="$PADDLE_ALIAS" \
+    OCR_PROXY_BLOCK_ENGINE="${OCR_PROXY_BLOCK_ENGINE:-surya}" \
     "$ROOT/.venv/bin/python" "$ROOT/scripts/ocr_proxy.py" \
     >> "$PROXY_LOG" 2>&1 < /dev/null &
   echo $! > "$PROXY_PID"
