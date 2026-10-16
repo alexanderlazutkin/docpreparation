@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Очистка MD перед QC: удаляет строки с точечными лидерами оглавления
-(«1.1. Процесс ......... 2») — TOC-мусор не должен попадать в индекс БЗ.
+(«1.1. Процесс ......... 2», в т.ч. внутри таблиц «| 3.3 Название ..... | 54 |»
+— лидеры короче 8 точек, DAMA-DMBOK) — TOC-мусор не должен попадать в индекс БЗ.
 Схлопывает серии пустых строк. Usage: clean_md.py <file.md>
 """
 
@@ -8,11 +9,14 @@ import re
 import sys
 import pathlib
 
+# лидер: 4+ точки перед «|» (ячейка TOC-таблицы) или перед номером страницы
+LEADER = re.compile(r"\.{4,}\s*(\||\d)|\.{8,}")
+
 p = pathlib.Path(sys.argv[1])
 lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
 out, removed = [], 0
 for ln in lines:
-    if re.search(r"\.{8,}", ln):
+    if LEADER.search(ln.rstrip("\n")):
         removed += 1
         continue
     out.append(ln)
