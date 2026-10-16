@@ -46,7 +46,7 @@ scripts/launch_batch.sh              # 3) обработка (откроется
 |---|---|
 | `scripts/launch_batch.sh` | все файлы inbox/ целиком |
 | `scripts/launch_batch.sh --pages "1-10"` | тестовая выборка первых 10 стр. каждого файла |
-| `scripts/launch_batch.sh --fragments 4` | большой файл поочерёдно 4 кусками (каждый — свой каталог `outbox/<имя>__pS-E/` и свой resume) |
+| `scripts/launch_batch.sh --fragments 4` | большой файл поочерёдно 4 кусками (каждый — свой каталог `outbox/<имя>__pS-E/` и свой resume); **при K>1 куски автоматически склеиваются** в один `.md` без потерь: все части входят посимвольно, ссылки на картинки целы, `_meta.json` объединяется, мягкий QC + `.qc_pass` (скрипт `scripts/merge_fragments.py`, selftest `--selftest`) |
 | `scripts/launch_batch.sh --retry-ocr` | при QC FAIL ретрай `--force_ocr` (по умолчанию ВЫКЛ) |
 | `scripts/launch_batch.sh --force` | переобработать даже готовое |
 | `CAPTION_FIGURES=0 scripts/launch_batch.sh` | без captioning (быстрый прогон) |
@@ -283,7 +283,7 @@ Cherry Studio индексирует только текст → VLM-описа�
 | 23 | Окно batch не должно висеть вечно без присмотра | hold в `launch_batch.sh` авто-закрывается через 5 мин | ✅ |
 | 24 | Тест новых OCR-моделей (GLM-OCR, PaddleOCR-VL-1.6) vs surya-2 | drop-in путь: флаги `--surya-model/--surya-mmproj/--surya-parallel`, замеры §3.6 — **отклонено** (несовместимость формата + медленнее); честный замер native-OCR — прямая транскрипция рендеров (опционально) | ✅ §3.6 |
 | 25 | Адаптер-прокси PaddleOCR-VL → marker (гибрид surya+Paddle) | `services.sh start --ocr-proxy` (прокси :8511 `scripts/ocr_proxy.py` + Paddle :8512), selftest `--test`, A/B `scripts/ab_block_ocr.py`; приёмка и выводы — §3.6 аддендум-2 (опциональный режим, не дефолт) | ✅ §3.6 |
-| 26 | При фрагментации (`--fragments`) части склеивать в один .md без потерь + проверка | не реализовано (бедка `cell--ll3um-mvapljefi2y`) | ⏸ запланировано |
+| 26 | При фрагментации (`--fragments`) части склеивать в один .md без потерь + проверка | `scripts/merge_fragments.py` (selftest `--selftest`), авто-склейка в `prepare_all.sh` при K>1; приёмка: СиММА 71 стр. × 3 фрагм. — 164К симв., кириллица 90,1%, 35/35 ссылок на картинки, 0 коллизий | ✅ |
 | 17 | Загрузка готовых .md в БЗ Cherry Studio | UI CS (API нет) — вручную | ⏸ отложено |
 | 18 | Локальный MinerU как авто-путь в CS (этап 3 плана) | `mineru-api :8000` | ⏸ отложено |
 | 19 | RAGFlow как целевая БЗ | после стабильной 1.x (VLM-описания там из коробки) | ⏸ отложено |

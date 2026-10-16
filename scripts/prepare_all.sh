@@ -5,7 +5,10 @@
 # Диапазон и фрагменты (для тестов и больших файлов):
 #   --pages "S[-E]"   начальная страница S (деф. 1), конечная E (деф. 0 = до конца)
 #   --fragments K     диапазон делится на K фрагментов, обрабатываемых поочерёдно
-#                     (деф. 1); каждый — свой каталог outbox/<имя>__pS-E/
+#                     (деф. 1); каждый — свой каталог outbox/<имя>__pS-E/ и свой resume;
+#                     при K>1 фрагменты автоматически склеиваются в один результат
+#                     (outbox/<имя>/ без --pages, иначе <имя>__pS-E/; проверки:
+#                     все части в результате, ссылки на картинки целы, мягкий QC)
 #   --retry-ocr       при QC FAIL выполнять ретрай --force_ocr (по умолчанию ВЫКЛ)
 #
 # Прогресс: стадии [k/5] по каждому файлу/фрагменту + ETA по logs/timings.jsonl
@@ -119,6 +122,33 @@ for f in "${FILES[@]}"; do
             ROWS+=("FAIL|$stem|$j/$K|$((SECONDS-t0))|$fn"); fails=$((fails+1))
         fi
     done
+
+    # Склейка фрагментов в один результат — автоматически при K>1.
+    # Имя: полный диапазон -> outbox/<имя>/; выборка (--pages) -> outbox/<имя>__pS-E/
+    if [ "$K" -gt 1 ]; then
+        MERGE_STEM="$stem"; [ -n "$PAGES" ] && MERGE_STEM="${stem}__p${S}-${E}"
+        if [ -f "outbox/$MERGE_STEM/.qc_pass" ] && [ -z "$FORCE" ]; then
+            echo "[--] $MERGE_STEM: склеенный результат уже готов (.qc_pass)"
+            ROWS+=("PASS|$MERGE_STEM|склейка|-|$total")
+        else
+            FRAG_DIRS=()
+            for rng in "${FR_RANGES[@]}"; do
+                fs="${rng%%-*}"; fe="${rng#*-}"
+                FRAG_DIRS+=("outbox/${stem}__p${fs}-${fe}")
+            done
+            echo ""
+            echo "=================================================================="
+            echo "Склейка: $MERGE_STEM ($K фрагментов, $total стр.)"
+            echo "=================================================================="
+            t0=$SECONDS
+            if uv run --project "$ROOT" python "$ROOT/scripts/merge_fragments.py" \
+                --out "outbox/$MERGE_STEM" ${FORCE:+--force} "${FRAG_DIRS[@]}"; then
+                ROWS+=("PASS|$MERGE_STEM|склейка|$((SECONDS-t0))|$total")
+            else
+                ROWS+=("FAIL|$MERGE_STEM|склейка|$((SECONDS-t0))|$total"); fails=$((fails+1))
+            fi
+        fi
+    fi
 done
 
 echo ""
