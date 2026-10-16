@@ -28,15 +28,50 @@ if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
 # постоянному surya-серверу напрямую.
 SURYA_PORT="${SURYA_PORT:-8510}"
 OCR_PROXY_PORT="${OCR_PROXY_PORT:-8511}"
+ATTACHED_PROXY=0
 if [ -z "${SURYA_INFERENCE_URL:-}" ]; then
     if curl -sf -m 2 "http://127.0.0.1:$OCR_PROXY_PORT/health" >/dev/null 2>&1; then
         export SURYA_INFERENCE_URL="http://127.0.0.1:$OCR_PROXY_PORT/v1"
-        echo "[--] аттач к OCR-прокси :$OCR_PROXY_PORT (block-OCR -> PaddleOCR-VL)"
+        ATTACHED_PROXY=1
+        echo "[--] аттач к OCR-прокси :$OCR_PROXY_PORT"
     elif curl -sf -m 2 "http://127.0.0.1:$SURYA_PORT/v1/models" >/dev/null 2>&1; then
         export SURYA_INFERENCE_URL="http://127.0.0.1:$SURYA_PORT/v1"
         echo "[--] аттач к постоянному surya-серверу :$SURYA_PORT"
     fi
+elif [ "${SURYA_INFERENCE_URL#*:8511}" != "$SURYA_INFERENCE_URL" ]; then
+    ATTACHED_PROXY=1
 fi
+
+# Факт-скорость marker: дельта /stats прокси (surya_layout = готовые страницы).
+# watch_speed <страниц в фрагменте> — фон при marker, печать при изменении.
+watch_speed() {
+    local n="$1" base="http://127.0.0.1:$OCR_PROXY_PORT" t0=$SECONDS
+    local base_layout fp0 last=-1
+    base_layout="$(curl -s -m 2 "$base/stats" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("surya_layout",0))
+except Exception: print(0)' 2>/dev/null || echo 0)"
+    fp0="$(curl -s -m 2 "$base/stats" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("surya_fullpage",0))
+except Exception: print(0)' 2>/dev/null || echo 0)"
+    while sleep 15; do
+        local st done fp el rate extra
+        st="$(curl -s -m 2 "$base/stats" 2>/dev/null)" || continue
+        read -r done fp <<EOF
+$(printf '%s' "$st" | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin); print(d.get("surya_layout",0), d.get("surya_fullpage",0))
+except Exception: print(-1,-1)' 2>/dev/null || echo "-1 -1")
+EOF
+        [ "$done" -ge 0 ] 2>/dev/null || continue
+        done=$((done - base_layout)); fp=$((fp - fp0))
+        [ "$done" = "$last" ] && continue
+        last="$done"; el=$((SECONDS - t0))
+        rate="—"; [ "$done" -gt 0 ] && rate="$(awk "BEGIN{printf \"%.1f\", $el/$done}")"
+        extra=""; [ "$fp" -gt 0 ] && extra=" | full-page OCR: $fp стр"
+        printf '[--] marker факт: %dм%02dс | layout %s/%s стр | %s с/стр%s\n' \
+            "$((el/60))" "$((el%60))" "$done" "$n" "$rate" "$extra"
+    done
+}
 
 IN="${1:?usage: prepare_doc.sh [--force] [--pages S[-E]] <file.pdf> [marker flags...]}"
 shift
@@ -103,12 +138,17 @@ caption() {
 }
 
 echo "== $STEM (${N_PAGES} стр.) =="
+WATCHER_PID=""
+stop_watcher() { [ -n "$WATCHER_PID" ] && kill "$WATCHER_PID" 2>/dev/null || true; WATCHER_PID=""; }
+trap stop_watcher EXIT
 stage 1/6 "marker (balanced)"
-# marker именует выход по имени файла: гоним во временный каталог и переносим
+# marker именует выход по имени файла: гоняем во временный каталог и переносим
 TMP="$OUT/.tmp.$$"; rm -rf "$TMP"; mkdir -p "$TMP"
 local_tm0=$SECONDS
+[ "$ATTACHED_PROXY" = 1 ] && { watch_speed "$N_PAGES" & WATCHER_PID=$!; }
 uv run --project "$ROOT" marker_single "$IN" --output_dir "$TMP" --mode balanced \
     "${PAGE_ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
+stop_watcher
 TM=$((SECONDS-local_tm0))
 if [ ! -f "$TMP/$STEM_BASE/$STEM_BASE.md" ]; then
     echo "[FAIL] marker не создал MD ($TMP/$STEM_BASE/)"; rm -rf "$TMP"; exit 1
@@ -133,8 +173,10 @@ if ! qc; then
         rm -rf "$DIR" "$TMP"
         mkdir -p "$TMP"
         local_tm0=$SECONDS
+        [ "$ATTACHED_PROXY" = 1 ] && { watch_speed "$N_PAGES" & WATCHER_PID=$!; }
         uv run --project "$ROOT" marker_single "$IN" --output_dir "$TMP" --mode balanced --force_ocr \
             "${PAGE_ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
+        stop_watcher
         TM=$((SECONDS-local_tm0))
         mkdir -p "$DIR"
         mv "$TMP/$STEM_BASE"/* "$DIR"/ ; rm -rf "$TMP"
@@ -159,5 +201,5 @@ stage 6/6 "готово"
 mkdir -p "$ROOT/logs"
 printf '{"stem":"%s","pages":%s,"marker_s":%s,"caption_s":%s,"figs":%s,"total_s":%s}\n' \
     "$STEM" "$N_PAGES" "$TM" "$TC" "$FIGS" "$((SECONDS-T0))" >> "$ROOT/logs/timings.jsonl"
-echo "[PASS] $STEM -> $MD (marker ${TM}с + caption ${TC}с; всего $((SECONDS-T0))с)"
+echo "[PASS] $STEM -> $MD (marker ${TM}с = $(awk "BEGIN{printf \"%.1f\", $TM/$N_PAGES}") с/стр; всего $((SECONDS-T0))с)"
 [ "$QCRC" = 0 ] || echo "[!] QC мягко провален (фрагмент/выборка) — проверь вручную"

@@ -118,8 +118,17 @@
   потери текста → `--retry-ocr`.
 - `--ocr-proxy` (адаптер): в balanced block-OCR вызывается только в
   table-fallback (таблицы с битыми шрифтами), формулы и fast-mode хирургия —
-  на чистом цифровом PDF Paddle простаивает, прокси работает как pass-through
-  (§3.6 аддендум-2). Для смены набора сервисов: явный `stop` → `start`.
+  на чистом цифровом PDF Paddle простаивает; дефолт block-OCR=surya (аддендум-4).
+  Для смены набора сервисов: явный `stop` → `start`.
+- **Порт :8080 занят snap-сервисом `lemonade-server`** (AMD LLM-сервер на
+  llama.cpp/Vulkan, systemd-автостарт): поднимает недокачанный Nemotron-чекпойнт
+  из своего реестра (`/media/llm/Models/Nemotron-3-Nano-Omni-…-GGUF`, main-файл
+  `__del to …` 1,36 ГБ — wget июля 2026 прерван). Процесс скрыт (PID-namespace
+  snap), поэтому виден только слушающий сокет; опознать: `curl :8080/v1/models`
+  — формат с полями `checkpoint/checkpoints` = lemonade/новый llama-server.
+  Освободить порт (sudo, за пользователем): `sudo snap stop lemonade-server &&
+  sudo snap disable lemonade-server` (или `snap remove`). До тех пор
+  `services.sh start` с LLM скажет «чужая модель» и пропустит LLM.
 
 ## Ключевые артефакты
 | Что | Где |

@@ -114,17 +114,21 @@ for f in "${FILES[@]}"; do
         PA=(--pages "$rng")                       # фрагмент всегда с диапазоном
         [ "$K" -le 1 ] && [ -z "$PAGES" ] && PA=()  # полный документ без --pages
         if scripts/prepare_doc.sh $FORCE $RETRY ${PA[@]+"${PA[@]}"} "$f" 2>&1 | tee "logs/$stem.log"; then
-            ROWS+=("PASS|$stem|$j/$K|$((SECONDS-t0))")
+            ROWS+=("PASS|$stem|$j/$K|$((SECONDS-t0))|$fn")
         else
-            ROWS+=("FAIL|$stem|$j/$K|$((SECONDS-t0))"); fails=$((fails+1))
+            ROWS+=("FAIL|$stem|$j/$K|$((SECONDS-t0))|$fn"); fails=$((fails+1))
         fi
     done
 done
 
 echo ""
 echo "== Итог batch ($N файл(ов)) =="
-printf '%-5s %-50s %-7s %7s\n' "QC" "Файл" "фрагм." "сек"
-for r in "${ROWS[@]}"; do IFS='|' read -r q s fr t <<< "$r"; printf '%-5s %-50s %-7s %7s\n' "$q" "$s" "$fr" "$t"; done
+printf '%-5s %-46s %-7s %6s %8s\n' "QC" "Файл" "фрагм." "сек" "с/стр"
+for r in "${ROWS[@]}"; do
+    IFS='|' read -r q s fr t n <<< "$r"
+    spp="$(awk "BEGIN{n=$n+0; if (n>0) printf \"%.1f\", $t/n; else print \"—\"}")"
+    printf '%-5s %-46s %-7s %6s %8s\n' "$q" "${s:0:46}" "$fr" "$t" "$spp"
+done
 echo "Готовых: $(( ${#ROWS[@]} - fails ))/${#ROWS[@]}; .md — в outbox/, логи — в logs/"
 printf 'ts=%s\nfiles=%s\nfails=%s\n' "$(date +%s)" "$N" "$fails" > logs/batch_latest.result
 [ "$fails" = 0 ]

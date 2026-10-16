@@ -50,7 +50,10 @@ BLOCK_ENGINE = os.environ.get("OCR_PROXY_BLOCK_ENGINE", "surya").lower()
 # Контракт surya (surya/inference/prompts.py) — промпт block-OCR.
 BLOCK_PROMPT = "OCR this block image to HTML."
 
-STATS = {"surya": 0, "paddle": 0, "surya_err": 0, "paddle_err": 0}
+STATS = {
+    "surya_layout": 0, "surya_table_rec": 0, "surya_fullpage": 0,
+    "surya_block": 0, "surya_other": 0, "paddle_block": 0, "errors": 0,
+}
 _stats_lock = threading.Lock()
 
 
@@ -61,6 +64,21 @@ def log(msg: str) -> None:
 def route_prompt(prompt: str | None) -> str:
     """block-OCR → BLOCK_ENGINE (деф. surya); остальное → surya (safe default)."""
     return BLOCK_ENGINE if prompt == BLOCK_PROMPT else "surya"
+
+
+def classify_prompt(prompt: str | None) -> str:
+    """Тип запроса для /stats (факт-скорость: layout = готовые страницы)."""
+    if prompt == BLOCK_PROMPT:
+        return "block"
+    if prompt is None:
+        return "other"
+    if prompt.startswith("Output the layout"):
+        return "layout"
+    if prompt.startswith("Output the table rows"):
+        return "table_rec"
+    if prompt.startswith("OCR this image to HTML"):
+        return "fullpage"
+    return "other"
 
 
 def extract_prompt(messages: list) -> str | None:
@@ -186,7 +204,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._error(400, f"bad request: {e}")
             return
 
-        route = route_prompt(extract_prompt(req.get("messages")))
+        prompt = extract_prompt(req.get("messages"))
+        route = route_prompt(prompt)
+        kind = classify_prompt(prompt)
         t0 = time.monotonic()
         try:
             with httpx.Client(timeout=UPSTREAM_TIMEOUT) as client:
@@ -203,14 +223,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     )
         except httpx.HTTPError as e:
             with _stats_lock:
-                STATS[f"{route}_err"] += 1
+                STATS["errors"] += 1
             self._error(502, f"{route} upstream unreachable: {e}")
             return
 
         ms = int((time.monotonic() - t0) * 1000)
         if upstream.status_code != 200:
             with _stats_lock:
-                STATS[f"{route}_err"] += 1
+                STATS["errors"] += 1
             log(
                 f"{route:6s} -> {upstream.status_code} ({ms} ms) upstream: {upstream.text[:200]}"
             )
@@ -220,7 +240,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
 
         with _stats_lock:
-            STATS[route] += 1
+            STATS[f"{route}_{kind}"] += 1
         if route == "surya":
             log(f"surya  -> 200 ({ms} ms)")
             self._send(200, upstream.content)
@@ -467,7 +487,9 @@ def run_selftest() -> int:
     )
 
     with _stats_lock:
-        check("e2e: счётчики маршрутов", STATS["surya"] >= 1 and STATS["paddle"] >= 1)
+        check("e2e: счётчики маршрутов (по типам)",
+              STATS["surya_layout"] >= 1 and STATS["paddle_block"] >= 1
+              and STATS["surya_block"] >= 1 and STATS["errors"] == 0)
 
     r = httpx.get(f"http://127.0.0.1:{proxy_port}/v1/models", timeout=5)
     check(
