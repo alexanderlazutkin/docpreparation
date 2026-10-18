@@ -12,33 +12,41 @@
 #                     после УСПЕШНОЙ склейки каталоги фрагментов удаляются
 #                     (деф.). --debug — оставить фрагменты для ручной проверки
 #                     склейки (и доп. отладочный функционал в будущем)
-#   --fragment-pause N  пауза (сек) между фрагментами — охлаждение ПК при
-#                     длинных пакетных прогонах (деф. 0 = без паузы)
+#   --fragment-pause N  пауза (сек) между фрагментами И между файлами —
+#                     охлаждение ПК при длинных пакетных прогонах
+#                     (деф. 0 = без паузы; не после последнего фрагмента/файла)
 #   --retry-ocr       при QC FAIL выполнять ретрай --force_ocr (по умолчанию ВЫКЛ)
+#   --lang ru|en      язык документа: VLM-описания и гейт QC (кириллица/латиница);
+#                     без флага — авто-детект в prepare_doc (деф. ru)
 #
 # Прогресс: стадии [k/5] по каждому файлу/фрагменту + ETA по logs/timings.jsonl
 # (медиана с/страницу; при пустой истории — сид 8.4 с/стр, 0.5 с/стр caption).
 # Логи: logs/<имя>.log на файл, logs/batch_<датавремя>.log сводный,
 #   logs/batch_latest.log / logs/batch_latest.result — для мониторинга агентом.
 # Usage: scripts/prepare_all.sh [--force] [--pages "S[-E]"] [--fragments K]
+#        [--no-page-anchors] (метки страниц ⌗p.N — деф. ВКЛ, см. prepare_doc.sh)
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-FORCE="" PAGES="" FRAGS=1 RETRY="" DEBUG=0 PAUSE=0
+FORCE="" PAGES="" FRAGS=1 RETRY="" DEBUG=0 PAUSE=0 LANG_ARG="" NO_ANCHORS=""
 while [ $# -gt 0 ]; do
     case "${1//_/-}" in
         --force) FORCE="--force"; shift ;;
         --pages) PAGES="${2:?--pages требует значение}"; shift 2 ;;
         --fragments) FRAGS="${2:?--fragments требует значение}"; shift 2 ;;
         --retry-ocr) RETRY="--retry-ocr"; shift ;;
+        --no-page-anchors) NO_ANCHORS="--no-page-anchors"; shift ;;
         --debug) DEBUG=1; shift ;;
         --fragment-pause) PAUSE="${2:?--fragment-pause требует значение}"; shift 2 ;;
         --fragment-pause=*) PAUSE="${1#*=}"; shift ;;
+        --lang) LANG_ARG="${2:?--lang требует значение}"; shift 2 ;;
+        --lang=*) LANG_ARG="${1#*=}"; shift ;;
         *) echo "неизвестный аргумент: $1"; exit 2 ;;
     esac
 done
 [ "$PAUSE" -ge 0 ] 2>/dev/null || { echo "--fragment-pause: ожидается целое >= 0 (сек)"; exit 2; }
+case "$LANG_ARG" in ""|ru|en) ;; *) echo "--lang: ожидается ru|en"; exit 2 ;; esac
 mkdir -p logs outbox
 
 BATCH_LOG="logs/batch_$(date +%Y%m%d_%H%M).log"
@@ -76,12 +84,14 @@ fmt_mmss() { printf '%d мин %02d с' $(( $1 / 60 )) $(( $1 % 60 )); }
 mapfile -t FILES < <(ls -1 inbox/*.pdf 2>/dev/null | sort)
 N=${#FILES[@]}
 [ "$N" -gt 0 ] || { echo "inbox/ пуст — нечего обрабатывать"; exit 0; }
+# конвенция: типы не смешиваем; *.md (вэб-клипы) — отдельный путь
+ls inbox/*.md >/dev/null 2>&1 && echo "[--] внимание: в inbox/ есть *.md — этот batch их не трогает (см. prepare_web.sh)"
 
 echo "== Batch: $N файл(ов), $(date '+%Y-%m-%d %H:%M:%S'), лог: $BATCH_LOG =="
 echo "== ETA-скорости: marker ${R_MARK} с/стр, caption ${R_CAP} с/стр (${ETA_SRC}) =="
 RS="выкл"; [ -n "$RETRY" ] && RS="вкл"
 DB="выкл"; [ "$DEBUG" = 1 ] && DB="вкл (фрагменты сохраняются)"
-echo "== Диапазон: ${PAGES:-весь документ}; фрагментов: ${FRAGS}; fragment-pause: ${PAUSE}с; retry-ocr: $RS; debug: $DB =="
+echo "== Диапазон: ${PAGES:-весь документ}; фрагментов: ${FRAGS}; fragment-pause: ${PAUSE}с (между фрагментами и файлами); язык: ${LANG_ARG:-авто}; retry-ocr: $RS; debug: $DB =="
 
 ROWS=()
 k=0; fails=0
@@ -126,7 +136,7 @@ for f in "${FILES[@]}"; do
         t0=$SECONDS
         PA=(--pages "$rng")                       # фрагмент всегда с диапазоном
         [ "$K" -le 1 ] && [ -z "$PAGES" ] && PA=()  # полный документ без --pages
-        if scripts/prepare_doc.sh $FORCE $RETRY ${PA[@]+"${PA[@]}"} "$f" 2>&1 | tee "logs/$stem.log"; then
+        if scripts/prepare_doc.sh $FORCE $RETRY $NO_ANCHORS ${LANG_ARG:+--lang "$LANG_ARG"} ${PA[@]+"${PA[@]}"} "$f" 2>&1 | tee "logs/$stem.log"; then
             ROWS+=("PASS|$stem|$j/$K|$((SECONDS-t0))|$fn")
         else
             ROWS+=("FAIL|$stem|$j/$K|$((SECONDS-t0))|$fn"); fails=$((fails+1))
@@ -172,6 +182,13 @@ for f in "${FILES[@]}"; do
                 echo "[!] фрагменты сохранены (склейка не прошла)"
             fi
         fi
+    fi
+
+    # пауза между файлами (охлаждение ПК), не после последнего; действует
+    # независимо от фрагментации (файл без фрагментов — та же пауза)
+    if [ "$PAUSE" -gt 0 ] && [ "$k" -lt "$N" ]; then
+        echo "[--] пауза ${PAUSE}с перед следующим файлом (fragment-pause)…"
+        sleep "$PAUSE"
     fi
 done
 

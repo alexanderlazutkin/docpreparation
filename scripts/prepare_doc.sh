@@ -1,24 +1,35 @@
 #!/usr/bin/env bash
-# PDF -> Markdown: [1/6] marker (balanced) -> [2/6] captioning -> [3/6] cleanup
-#   (точечные лидеры TOC) -> [4/6] QC -> [5/6] ретрай --force_ocr (ТОЛЬКО с
-#   флагом --retry-ocr; для фрагментов QC всегда мягкий) -> [6/6] готово.
+# PDF -> Markdown: [1/6] marker (balanced, метки страниц ⌗p.N) -> [2/6]
+#   captioning -> [3/6] cleanup (лидеры TOC; {N}----- -> ⌗p.N+1) -> [4/6] QC
+#   -> [5/6] ретрай --force_ocr (ТОЛЬКО с флагом --retry-ocr; для фрагментов
+#   QC всегда мягкий) -> [6/6] готово.
+# Метки страниц PDF (⌗p.N, 1-based как в просмотрщике) — всегда, отключить:
+#   --no-page-anchors. Позволяют из БЗ ссылаться на исходную страницу файла.
 # Диапазон: --pages "S[-E]" (1-индекс; без E или E=0 — до конца документа).
 #   Фрагмент пишется в outbox/<имя>__pS-E/ (полный документ — в outbox/<имя>/).
 # Статус: outbox/<...>/.status; успех: .qc_pass (resume); --force — переобработка.
 # Captioning: локальный LLM-сервис (services.sh) или облако через env
 #   CAPTION_API/CAPTION_MODEL/CAPTION_API_KEY (см. .env.example).
-# Usage: prepare_doc.sh [--force] [--retry-ocr] [--pages "S[-E]"] <file.pdf> [флаги marker_single]
+# Язык документа (ru|en, только эти два): флаг --lang > env CAPTION_LANG >
+#   авто-детект (имя файла -> текст документа -> метаданные pdfinfo; деф. ru).
+#   Управляет языком VLM-описаний и гейтом QC (кириллица/латиница >= 55%);
+#   определение пишется в лог.
+# Usage: prepare_doc.sh [--force] [--retry-ocr] [--lang ru|en] [--pages "S[-E]"]
+#        [--no-page-anchors] <file.pdf> [флаги marker_single]
 set -euo pipefail
 
-FORCE=0 PAGES="" RETRY_OCR="${RETRY_OCR:-0}"
+FORCE=0 PAGES="" RETRY_OCR="${RETRY_OCR:-0}" LANG_FLAG="" PAGE_ANCHORS=1
 while :; do
     case "${1:-}" in
         --force) FORCE=1; shift ;;
         --pages) PAGES="${2:?--pages требует значение}"; shift 2 ;;
         --retry-ocr) RETRY_OCR=1; shift ;;
+        --lang) LANG_FLAG="${2:?--lang требует значение}"; shift 2 ;;
+        --no-page-anchors) PAGE_ANCHORS=0; shift ;;
         *) break ;;
     esac
 done
+case "$LANG_FLAG" in ""|ru|en) ;; *) echo "--lang: ожидается ru|en"; exit 2 ;; esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
@@ -110,12 +121,63 @@ if [ -f "$DIR/.qc_pass" ] && [ "$FORCE" = 0 ]; then
     exit 0
 fi
 
-qc() { uv run --project "$ROOT" python "$ROOT/scripts/qc_check.py" "$MD"; }
+qc() { uv run --project "$ROOT" python "$ROOT/scripts/qc_check.py" --lang "$DOC_LANG" "$MD"; }
 
 CAPTION_FIGURES="${CAPTION_FIGURES:-1}"
 cleanup() {
     stage 3/6 "cleanup (лидеры оглавления)"
     uv run --project "$ROOT" python "$ROOT/scripts/clean_md.py" "$MD"
+}
+# Язык документа (ru|en): --lang (принудительно) > CAPTION_LANG > имя файла
+# (кириллица) > ТЕКСТ документа (сильнейший сигнал — он и есть содержимое) >
+# метаданные pdfinfo (слабый сигнал: переведённые издания, шаблонный Title,
+# годится как fallback). Деф. ru. Результат: DOC_LANG + DOC_LANG_SRC.
+detect_lang() {
+    case "$LANG_FLAG" in
+        ru|en) DOC_LANG="$LANG_FLAG"; DOC_LANG_SRC="--lang (принудительно)"; return 0 ;;
+    esac
+    case "${CAPTION_LANG:-}" in
+        ru|en) DOC_LANG="$CAPTION_LANG"; DOC_LANG_SRC="CAPTION_LANG (принудительно)"; return 0 ;;
+    esac
+    local out
+    out="$(python3 - "$IN" "$MD" <<'PY'
+import re, subprocess, sys
+pdf, md = sys.argv[1], sys.argv[2]
+cyr = re.compile(r"[а-яёА-ЯЁ]")
+# 1) имя файла: кириллица -> ru (явный человеческий сигнал)
+if cyr.search(pdf):
+    print("ru\tимя файла (кириллица)"); sys.exit(0)
+# 2) текст документа — сильнейший сигнал: доля кириллицы среди букв
+try:
+    txt = open(md, encoding="utf-8", errors="ignore").read(65536)
+    letters = re.findall(r"[а-яёА-ЯЁa-zA-Z]", txt)
+    if letters:
+        n = sum(1 for c in letters if cyr.match(c))
+        print(("ru" if n / len(letters) >= 0.3 else "en")
+              + "\tтекст документа (кириллица "
+              + f"{100 * n / len(letters):.0f}%)")
+        sys.exit(0)
+except Exception:
+    pass
+# 3) метаданные pdfinfo (fallback: нет текста): Title/Author/Subject/Keywords
+try:
+    meta = subprocess.run(["pdfinfo", pdf], capture_output=True,
+                          text=True, timeout=10).stdout
+    vals = [l.split(":", 1)[1] for l in meta.splitlines()
+            if ":" in l and l.split(":", 1)[0].strip()
+            in ("Title", "Author", "Subject", "Keywords")]
+    joined = " ".join(vals).strip()
+    if joined:
+        if cyr.search(joined):
+            print("ru\tметаданные PDF"); sys.exit(0)
+        if re.search(r"[A-Za-z]", joined):
+            print("en\tметаданные PDF"); sys.exit(0)
+except Exception:
+    pass
+print("ru\tдефолт (сигналов нет)")
+PY
+)" || out=$'ru\tошибка детекта (дефолт)'
+    DOC_LANG="${out%%$'\t'*}"; DOC_LANG_SRC="${out#*$'\t'}"
 }
 caption() {
     [ "$CAPTION_FIGURES" = 1 ] || return 0
@@ -132,7 +194,8 @@ caption() {
     fi
     local tc0=$SECONDS
     stage 2/6 "captioning фигур (VLM-описания для поиска)"
-    uv run --project "$ROOT" python "$ROOT/scripts/caption_figures.py" "$MD" \
+    uv run --project "$ROOT" python "$ROOT/scripts/caption_figures.py" \
+        --lang "$DOC_LANG" "$MD" \
         || echo "[--] captioning: ошибка, продолжаем без описаний"
     TC=$((SECONDS-tc0))
 }
@@ -143,11 +206,25 @@ stop_watcher() { [ -n "$WATCHER_PID" ] && kill "$WATCHER_PID" 2>/dev/null || tru
 trap stop_watcher EXIT
 stage 1/6 "marker (balanced)"
 # marker именует выход по имени файла: гоняем во временный каталог и переносим
+mkdir -p "$ROOT/logs"
 TMP="$OUT/.tmp.$$"; rm -rf "$TMP"; mkdir -p "$TMP"
 local_tm0=$SECONDS
 [ "$ATTACHED_PROXY" = 1 ] && { watch_speed "$N_PAGES" & WATCHER_PID=$!; }
+# метки страниц: paginate_output=true конфигом (CLI-флага нет); при своём
+# --config_json у пользователя — не вмешиваемся, предупреждаем
+PAGCONF=()
+if [ "$PAGE_ANCHORS" = 1 ]; then
+    case " ${EXTRA[*]-} " in
+        *" --config_json "*)
+            echo "[--] свой --config_json: метки страниц ⌗p не гарантируются (добавь в json \"paginate_output\": true)" ;;
+        *)
+            printf '{"paginate_output": true}' > "$TMP/paginate.json"
+            PAGCONF=(--config_json "$TMP/paginate.json") ;;
+    esac
+fi
+# лог marker — для table repair (провальные таблицы, USAGE §2.6-Б)
 uv run --project "$ROOT" marker_single "$IN" --output_dir "$TMP" --mode balanced \
-    "${PAGE_ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
+    "${PAGE_ARGS[@]}" "${PAGCONF[@]}" ${EXTRA[@]+"${EXTRA[@]}"} 2>&1 | tee "$ROOT/logs/${STEM}.marker.log"
 stop_watcher
 TM=$((SECONDS-local_tm0))
 if [ ! -f "$TMP/$STEM_BASE/$STEM_BASE.md" ]; then
@@ -159,6 +236,41 @@ if [ "$STEM" != "$STEM_BASE" ]; then  # фрагмент: MD и meta под им
     mv "$DIR/$STEM_BASE.md" "$MD"
     [ -f "$DIR/${STEM_BASE}_meta.json" ] && mv "$DIR/${STEM_BASE}_meta.json" "$DIR/${STEM}_meta.json"
 fi
+
+# [1.5] Ремонт провальных таблиц (USAGE §2.6-Б): 2-я попытка fast/pdftext по
+# страницам из «Table OCR failed» лога marker; вставка в конец секции страницы;
+# отчёт: восстановлено/не восстановлено (страница + блок + метрики).
+if [ "${TABLE_REPAIR_DONE:-0}" = 0 ] && [ "$QC_SOFT" = 0 ] && [ -s "$ROOT/logs/${STEM}.marker.log" ]; then
+    RP_OUT="$(uv run --project "$ROOT" python "$ROOT/scripts/table_repair.py" --parse "$ROOT/logs/${STEM}.marker.log" || true)"
+    RP_PAGES="$(printf '%s\n' "$RP_OUT" | sed -n 's/^TABLE_REPAIR_PAGES=//p' | head -1)"
+    if [ -n "$RP_PAGES" ]; then
+        echo "[--] table repair: провальные таблицы — 2-я попытка (fast/pdftext):"
+        printf '%s\n' "$RP_OUT" | grep '^  стр\.' | sed 's/^/    /'
+        OLDIFS="$IFS"; IFS=','
+        for idx in $RP_PAGES; do
+            TR="$OUT/.repair.$$"; rm -rf "$TR"; mkdir -p "$TR"
+            if uv run --project "$ROOT" marker_single "$IN" --output_dir "$TR" \
+                --page_range "$idx-$idx" --mode fast >/dev/null 2>&1 \
+                && [ -f "$TR/$STEM_BASE/$STEM_BASE.md" ]; then
+                uv run --project "$ROOT" python "$ROOT/scripts/table_repair.py" --splice \
+                    --main "$MD" --page "$idx" --retry "$TR/$STEM_BASE/$STEM_BASE.md" \
+                    | sed 's/^/    /' || true
+            else
+                echo "    стр. $((idx+1)): fast-ретрай не удался (ошибка marker)"
+            fi
+            rm -rf "$TR"
+        done
+        IFS="$OLDIFS"
+    fi
+fi
+[ "$QC_SOFT" = 1 ] && echo "[--] table repair: пропущен (фрагментный режим; полный прогон отремонтирует)"
+TABLE_REPAIR_DONE=1
+
+# язык документа: один раз на файл (нужен и captioning, и QC), логируем
+detect_lang
+word="русском"; [ "$DOC_LANG" = en ] && word="английском"
+echo "[--] язык документа: $DOC_LANG — $DOC_LANG_SRC; VLM-описания и QC — на $word"
+
 caption
 cleanup
 
@@ -172,10 +284,11 @@ if ! qc; then
         stage 5/6 "QC FAIL -> ретрай --force_ocr (--retry-ocr)"
         rm -rf "$DIR" "$TMP"
         mkdir -p "$TMP"
+        [ "${#PAGCONF[@]}" -gt 0 ] && printf '{"paginate_output": true}' > "$TMP/paginate.json"
         local_tm0=$SECONDS
         [ "$ATTACHED_PROXY" = 1 ] && { watch_speed "$N_PAGES" & WATCHER_PID=$!; }
         uv run --project "$ROOT" marker_single "$IN" --output_dir "$TMP" --mode balanced --force_ocr \
-            "${PAGE_ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
+            "${PAGE_ARGS[@]}" "${PAGCONF[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
         stop_watcher
         TM=$((SECONDS-local_tm0))
         mkdir -p "$DIR"
@@ -195,7 +308,7 @@ if ! qc; then
     fi
 fi
 
-FIGS="$(grep -cF '**VLM-описание:**' "$MD" 2>/dev/null || true)"
+FIGS="$(grep -cE '\*\*VLM-(описание|description):\*\*' "$MD" 2>/dev/null || true)"
 touch "$DIR/.qc_pass"
 stage 6/6 "готово"
 mkdir -p "$ROOT/logs"

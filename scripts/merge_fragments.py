@@ -148,7 +148,8 @@ def merge(out_dir: pathlib.Path, frag_dirs: list[pathlib.Path], force: bool) -> 
     (out_dir / ".qc_pass").touch()
     print(
         f"[PASS] {out_dir.name}: {len(parts)} фрагм., {len(merged)} симв., "
-        f"кириллица {cyr_share(merged) * 100:.1f}%, картинок {n_imgs} "
+        f"буквы: кир {cyr_share(merged) * 100:.1f}% / "
+        f"лат {(1 - cyr_share(merged)) * 100:.1f}%, картинок {n_imgs} "
         f"(ссылок {n_media_refs}), переименований при коллизии: {len(renames_all)}"
     )
     return 0
