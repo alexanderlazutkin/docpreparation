@@ -186,6 +186,15 @@ CAPTION_STRUCTURED=1 uv run python scripts/caption_figures.py \
 ./services.sh stop
 ```
 
+Обёртка по всем книгам сразу — `scripts/redescribe_all.sh` (паузы охлаждения
+между книгами, per-book логи `logs/<имя>.redescribe.log`, фильтр-подстрока,
+проверка LLM-сервиса до старта; детали/примеры — в шапке скрипта):
+```bash
+scripts/redescribe_all.sh                      # все книги, пауза 90с (деф.)
+scripts/redescribe_all.sh --pause 120 "Vol."   # только DMRB, пауза 120с
+scripts/redescribe_all.sh --pause 0 "Halpin"   # одна книга, без пауз
+```
+
 ### 2.4-В Вэб-страницы: Obsidian Web Clipper → MD с VLM-описаниями
 Вэб-страница сохраняется в MD расширением **Obsidian Web Clipper** (браузер) —
 файл кладётся в `inbox/` (frontmatter сохраняется). Далее:
