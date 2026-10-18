@@ -123,6 +123,16 @@
   `<имя>.md.bak_caption`. Selftest `--selftest` (12 проверок), бой: 871/871
   блоков чисто, идемпотентно. Обёртка по всем книгам: `scripts/
   redescribe_all.sh` (паузы между книгами, фильтр, логи). Примеры — USAGE §2.4-С.
+- **CHM → MD: PowerDesigner-доки (2026-10-18)**: новый `scripts/chm_to_md.py`
+  (selftest 15/15; dep `html2text` добавлен в uv-проект) — распакованный CHM
+  → один MD: порядок/заголовки из `.hhc`, якоря источника `⌗doc:<html>`,
+  `.image`(PNG) → `figures/`, иконки <4КБ — отброс, вне-TOC html — хвостом,
+  `#фрагмент`-повторы — тихий скип. Принято: «PowerDesigner Data Architecture
+  Guide» (487 секций, 157 фигур, 1,6 МБ, QC PASS) и «PowerDesigner VBScript
+  Reference» (1119 секций, 46,5 МБ — честный объём справки по свойствам,
+  QC PASS; дробить по библиотекам Pd* — если CS не прожуёт). Осталось:
+  captioning Guide со structured (157 скриншотов; команды — USAGE §2.7).
+  USAGE §2.7.
 - Навык агенту: `.opencode/skills/docprep/SKILL.md`.
 - **Метки страниц PDF `⌗p.N` (2026-10-18, сл.шаг 0)**: каждая страница PDF
   открывается в MD строкой `⌗p.N` (N = физическая страница файла, 1-based, не

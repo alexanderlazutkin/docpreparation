@@ -3,5 +3,6 @@ name = "docpreparation"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "html2text>=2025.4.15",
     "marker-pdf>=2.0.0",
 ]
