@@ -49,6 +49,202 @@ MARKS = (MARK_RU, MARK_EN)
 # [^)]*? — допускаем пробелы в имени (вэб-имена вида «Схема ММ.png»)
 IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)]*?\.(?:png|jpe?g|gif|webp))\)", re.IGNORECASE)
 
+
+def strip_descriptions(lines):
+    """Вырезать blockquote-описания (произв. этого скрипта, ru+en, prose и
+    structured: маркер + ```mermaid-фенс + «Связи:/Edges:» + буллеты + pipe-
+    таблица + «> ⚠ …»), включая edge-случай «маркер на той же строке после
+    картинки» (в ранних прогонах описание клеилось без \\n). Грамматика
+    вставки — join("\\n\\n"), части разделены пустыми строками.
+    -> (новые строки, сколько блоков снято).
+    Прим.: строки-«хвосты» грамматики (свой «|»-таблица/буллет документа
+    вплотную к блоку) могут быть захвачены — перед применением делай бэкап.
+    """
+    out, removed, i = [], 0, 0
+    while i < len(lines):
+        ln = lines[i]
+        pos = [ln.find(m) for m in MARKS if m in ln]
+        mpos = min(pos) if pos else None
+        if mpos is None:
+            out.append(ln)
+            i += 1
+            continue
+        if mpos > 0:  # маркер не с начала строки
+            if not IMG_RE.search(ln[:mpos]):  # не после картинки — чужой текст
+                out.append(ln)
+                i += 1
+                continue
+            prefix = ln[:mpos].rstrip()  # картинку сохранить, хвост строки drop
+            out.append(prefix + ("\n" if ln.endswith("\n") else ""))
+        removed += 1
+        i = _consume_block(lines, i + 1, out)
+    return out, removed
+
+
+def _consume_block(lines, i, out):
+    """Съесть грамматику блока описания с позиции i; пустые строки перед
+    не-грамматикой вернуть в out (разделитель документа). -> новый i."""
+    BULLETS = ("-", "*", "•")
+    in_list = False
+    pending_blanks = []
+    while i < len(lines):
+        cur = lines[i]
+        if not cur.strip():
+            pending_blanks.append(cur)
+            i += 1
+            continue
+        s = cur.strip()
+        cont = (
+            cur.startswith((">", "```mermaid", "|"))  # blockquote/фенс/таблица
+            or (in_list and (s.startswith(BULLETS) or re.match(r"^\d+[.)]", s)))
+            or s.startswith(("Связи:", "Edges:"))
+            or (s.endswith(":") and s.rstrip(":").strip() in ("Связи", "Edges"))
+        )
+        if not cont:
+            break
+        pending_blanks = []
+        if cur.startswith("```mermaid"):
+            i += 1
+            while i < len(lines) and lines[i].strip() != "```":
+                i += 1
+            if i < len(lines):
+                i += 1  # закрывающий фенс
+            continue
+        in_list = in_list or s.rstrip(":").strip() in ("Связи", "Edges")
+        i += 1
+    out.extend(pending_blanks)  # хвостовые пустые — сохранить (разделитель)
+    return i
+
+
+def selftest():
+    """Тесты strip_descriptions на синтетике (без сети/сервисов)."""
+    checks = []
+
+    def check(name, cond):
+        checks.append((name, bool(cond)))
+
+    # 1) prose-only ru: маркер + текст, дальше контент документа
+    lines = [
+        "![a](x.png)\n",
+        "> **VLM-описание:** Схема базы.\n",
+        "\n",
+        "Текст главы.\n",
+    ]
+    out, n = strip_descriptions(lines)
+    check("prose ru снят", n == 1 and "".join(out) == "![a](x.png)\n\nТекст главы.\n")
+
+    # 2) en-маркер
+    lines = ["![a](x.png)\n", "> **VLM-description:** ER diagram.\n", "## Heading\n"]
+    out, n = strip_descriptions(lines)
+    check("prose en снят", n == 1 and "".join(out) == "![a](x.png)\n## Heading\n")
+
+    # 3) structured полный: prose + mermaid + Edges + таблица + ⚠
+    block = (
+        "> **VLM-description:** Diagram of A and B.\n"
+        "\n"
+        "```mermaid\n"
+        "erDiagram\n"
+        "    A ||--o{ B : has\n"
+        "```\n"
+        "\n"
+        "Edges:\n"
+        "\n"
+        "- A to B\n"
+        "\n"
+        "| h1 | h2 |\n"
+        "|---|---|\n"
+        "| x | y |\n"
+        "\n"
+        "> ⚠ Uncertainties: cardinality of A-B\n"
+    )
+    lines = ["![a](x.png)\n", *block.splitlines(keepends=True), "## Heading\n"]
+    out, n = strip_descriptions(lines)
+    check(
+        "structured снят целиком",
+        n == 1 and "".join(out) == "![a](x.png)\n## Heading\n",
+    )
+    # 3-Б) то же, но с пустой строкой после блока (как в реальных файлах)
+    lines = ["![a](x.png)\n", *block.splitlines(keepends=True), "\n", "## Heading\n"]
+    out, n = strip_descriptions(lines)
+    check(
+        "structured снят, разделитель цел",
+        n == 1 and "".join(out) == "![a](x.png)\n\n## Heading\n",
+    )
+
+    # 4) две картинки-описания подряд — снимаются оба
+    lines = [
+        "![a](x.png)\n",
+        "> **VLM-описание:** Первая.\n",
+        "\n",
+        "![b](y.png)\n",
+        "> **VLM-описание:** Вторая.\n",
+        "\n",
+        "Хвост.\n",
+    ]
+    out, n = strip_descriptions(lines)
+    check("оба блока сняты", n == 2 and "VLM" not in "".join(out))
+
+    # 5) контент документа после блока НЕ тронут (prose-абзац)
+    lines = [
+        "![a](x.png)\n",
+        "> **VLM-описание:** Текст.\n",
+        "\n",
+        "Обычный абзац книги.\n",
+    ]
+    out, _ = strip_descriptions(lines)
+    check("абзац после блока цел", "Обычный абзац книги.\n" in "".join(out))
+
+    # 6) «>»-цитата ДОКУМЕНТА (не наш маркер) — не трогается
+    lines = ["> Обычная цитата документа.\n", "Текст.\n"]
+    out, n = strip_descriptions(lines)
+    check("чужая цитата цела", n == 0 and "".join(out) == "".join(lines))
+
+    # 7) идемпотентность: повторный вызов ничего не меняет
+    once, n1 = strip_descriptions(
+        ["![a](x.png)\n"] + block.splitlines(keepends=True) + ["Хвост.\n"]
+    )
+    twice, n2 = strip_descriptions(once)
+    check("идемпотентно", n1 == 1 and n2 == 0 and once == twice)
+
+    # 8) mermaid-фенс НЕ нашего блока (код в документе) — не трогается
+    lines = ["```mermaid\n", "graph TD\n", "```\n", "Текст.\n"]
+    out, n = strip_descriptions(lines)
+    check("чужой фенс цел", n == 0 and out == lines)
+
+    # 9) «Связи:» с буллетами, затем чужой абзац — граница корректна
+    lines = [
+        "> **VLM-описание:** Схема.\n",
+        "\n",
+        "Связи:\n",
+        "\n",
+        "- A -> B\n",
+        "- B -> C\n",
+        "\n",
+        "Дальше глава.\n",
+    ]
+    out, n = strip_descriptions(lines)
+    check("связи сняты, абзац цел", n == 1 and "".join(out) == "\nДальше глава.\n")
+
+    # 10) edge: маркер на ТОЙ ЖЕ строке после картинки (ранние прогоны)
+    lines = ["![a](x.png)> **VLM-описание:** Схема.\n", "\n", "Хвост.\n"]
+    out, n = strip_descriptions(lines)
+    check(
+        "маркер в строке с картинкой снят",
+        n == 1 and "".join(out) == "![a](x.png)\n\nХвост.\n",
+    )
+
+    # 11) маркер-текст БЕЗ картинки перед ним (упоминание в prose) — не трогать
+    lines = ["Абзац, где цитируется «> **VLM-описание:** …» как пример.\n"]
+    out, n = strip_descriptions(lines)
+    check("упоминание в prose цела", n == 0 and out == lines)
+
+    bad = [nm for nm, ok in checks if not ok]
+    for nm, ok in checks:
+        print(f"  {'ok' if ok else 'FAIL'}  {nm}")
+    print(f"selftest caption_figures (strip): {len(checks) - len(bad)}/{len(checks)}")
+    return 1 if bad else 0
+
+
 # язык код -> фраза для промпта (только ru/en, другие не поддерживаются)
 LANG_WORDS = {"ru": "русском", "en": "английском"}
 
@@ -381,7 +577,7 @@ def describe_structured(api, alias, img_path, ctx, lang):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("md", type=pathlib.Path)
+    ap.add_argument("md", type=pathlib.Path, nargs="?")
     ap.add_argument(
         "--limit", type=int, default=0, help="описать не более N картинок (0 = все)"
     )
@@ -415,7 +611,16 @@ def main():
         "+ список связей (валидация mmdc, ретрай x1, фолбэк prose), таблицы -> "
         "pipe-MD реконструкция (деф. выкл; env CAPTION_STRUCTURED=1)",
     )
+    ap.add_argument(
+        "--redescribe",
+        action="store_true",
+        help="снять старые blockquote-описания (ru/en, prose и structured) "
+        "и описать фигуры заново; бэкап <md>.bak_caption рядом",
+    )
+    ap.add_argument("--selftest", action="store_true", help="тесты strip_descriptions")
     a = ap.parse_args()
+    if a.selftest:
+        sys.exit(selftest())
     min_bytes = int(os.environ.get("CAPTION_MIN_BYTES", "20000"))
     mark = MARK_RU if a.lang == "ru" else MARK_EN
     tpl, tpl_src = prompt_template(a.lang)
@@ -426,6 +631,17 @@ def main():
     )
 
     lines = a.md.read_text(encoding="utf-8").splitlines(keepends=True)
+    if a.redescribe:
+        lines, n_removed = strip_descriptions(lines)
+        if n_removed:
+            backup = a.md.with_suffix(a.md.suffix + ".bak_caption")
+            backup.write_bytes(a.md.read_bytes())
+            print(
+                f"redescribe: снято старых описаний {n_removed}, "
+                f"бэкап {backup.name} (снимок до перезаписи)"
+            )
+        else:
+            print("redescribe: старых описаний нет — будет дописано недостающее")
     try:
         alias = a.model or model_alias(a.api)
     except Exception:  # noqa: BLE001 — сервис недоступен = выход с кодом 2

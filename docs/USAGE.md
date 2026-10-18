@@ -170,6 +170,22 @@ mindmap; flowchart — универсальный фолбэк), erDiagram — �
 F), таблиц T, прочих O, ошибок E`. Цена: токены/время ×2–3 на фигуру —
 включать на финальных прогонах. Деф. выкл (`CAPTION_STRUCTURED=0`).
 
+**Апгрейд готовых MD без перегона marker** — `--redescribe` (2026-10-18):
+снимает старые blockquote-описания (ru/en, prose и structured, включая edge
+«маркер на строке с картинкой») и описывает фигуры заново в текущем режиме.
+Экономит стадию marker (~80% времени), но **не добавляет метки страниц ⌗p**
+(нужен полный прогон). Бэкап `<имя>.md.bak_caption` рядом; selftest
+`caption_figures.py --selftest` (12 проверок; на бою: 871/871 блоков
+снимаются чисто, идемпотентно). Граница блока — по грамматике вставки;
+крайний случай: свой буллет/«|»-таблица документа вплотную к блоку могут
+быть захвачены — сверяй diff против бэкапа.
+```bash
+./services.sh start --ocr-proxy
+CAPTION_STRUCTURED=1 uv run python scripts/caption_figures.py \
+    --redescribe --lang en --parallel 2 "outbox/<книга>/<книга>.md"
+./services.sh stop
+```
+
 ### 2.4-В Вэб-страницы: Obsidian Web Clipper → MD с VLM-описаниями
 Вэб-страница сохраняется в MD расширением **Obsidian Web Clipper** (браузер) —
 файл кладётся в `inbox/` (frontmatter сохраняется). Далее:
