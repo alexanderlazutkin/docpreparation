@@ -275,7 +275,11 @@
 4. [ ] **Chandra OCR 2 — план установки/тестирования (актуально, 2026-10-21)**:
 
    Этап 0 — подготовка (не трогает рабочий стек):
-   - Скачать community GGUF (своя конверсия не нужна):
+   - [x] GGUF СКАЧАН 2026-10-21 (этап 0 закрыт): Q8_0 4,9Г + mmproj-Q8_0
+     350М в `/media/llm/Models/OCR/chandra-ocr-2-gguf/`, sha256 из HF API
+     совпали; скрипт `scripts/download_chandra_gguf.sh` (коммит e93a5be)
+     идемпотентен. ДАЛЬШЕ: загрузочный тест mtmd на :8513 (первый шаг
+     этапа 1). Изначальный пункт:
      `scripts/download_chandra_gguf.sh` (метаданные+sha256 из HF API,
      `--dry-run`, resume через hf CLI, скип по совпавшему хэшу; проверен
      живым скачиванием mmproj). Источник: `mradermacher/
