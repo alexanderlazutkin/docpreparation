@@ -275,10 +275,16 @@
 4. [ ] **Chandra OCR 2 — план установки/тестирования (актуально, 2026-10-21)**:
 
    Этап 0 — подготовка (не трогает рабочий стек):
-   - Скачать community GGUF (своя конверсия не нужна): Q8_0 5,2 ГБ + mmproj
-     0,37 ГБ из `prithivMLmods/chandra-ocr-2-GGUF` (12,5k ↓; вариант с
-     SHA256SUMS — `dougvk/chandra-ocr-2-BF16-GGUF-RDNA4`, BF16 9,7 ГБ) →
-     `/media/llm/Models/OCR/chandra-ocr-2-gguf/` (свободно 68 ГБ).
+   - Скачать community GGUF (своя конверсия не нужна):
+     `scripts/download_chandra_gguf.sh` (метаданные+sha256 из HF API,
+     `--dry-run`, resume через hf CLI, скип по совпавшему хэшу; проверен
+     живым скачиванием mmproj). Источник: `mradermacher/
+     chandra-ocr-2-GGUF` — chandra-ocr-2.Q8_0.gguf 5,2 ГБ + mmproj-Q8_0
+     0,37 ГБ (статик-кванты с устойчивой репутацией; запасные:
+     `prithivMLmods/chandra-ocr-2-GGUF` 12,5k ↓, `dougvk/…-BF16-RDNA4`
+     c SHA256SUMS; при странностях vision — свап на mmproj-f16 0,67 ГБ) →
+     `/media/llm/Models/OCR/chandra-ocr-2-gguf/` (свободно 68 ГБ);
+     целостность сверить по LFS sha256 из HF API.
    - llama.cpp: **РЕШЕНО 2026-10-21 — обновляться не нужно**: текущий b11734
      уже = v0.7.0 (ставился 19.10 через `~/AI/install-llama-cpp.sh` — скрипт
      берёт новейший nightly с prebuilt, а не релизные теги), arch

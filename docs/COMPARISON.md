@@ -146,8 +146,9 @@
   сборки, а НЕ в крошечном (17 КБ) лаунчере `llama-server`. Непроверено лишь
   одно: mtmd/mmproj-погрузчик vision-башни — решит первая загрузка модели.
   Своя конверсия не нужна — community GGUF с mmproj:
-  `prithivMLmods/chandra-ocr-2-GGUF` (Q8_0 5,2 ГБ + mmproj 0,37 ГБ, 12,5k ↓),
-  `dougvk/chandra-ocr-2-BF16-GGUF-RDNA4` (BF16 + SHA256SUMS).
+  `mradermacher/chandra-ocr-2-GGUF` (Q8_0 5,2 ГБ + mmproj 0,37 ГБ —
+  выбор 2026-10-21), запасные: `prithivMLmods/…` (12,5k ↓),
+  `dougvk/…-BF16-RDNA4` (BF16 + SHA256SUMS).
 - **У нас:** в работе — план установки/гейтов (кириллица → таблицы →
   скорость → интеграция в ocr_proxy) — HANDOFF «Следующие шаги» п.4;
   влезает в 128 ГБ с запасом, iGPU-скорость меряем на этапе 1.
