@@ -45,6 +45,12 @@
 #   LLM_MMPROJ (деф. mmproj-F32.gguf рядом с моделью; пусто = текст-only сервис)
 #   LLM_PORT=8080  LLM_CTX=32768  LLM_PARALLEL=2 (35B: 2 слота × 16k)
 #   WAIT_SVC=600 (сек на загрузку модели в GPU)
+#   LLAMA_BIN (деф. llama-server из PATH) — какой бинарь llama-server запускать
+#      во всех сервисах. ПИНЬТЕ версию перед обновлением llama.cpp
+#      (~/AI/install-llama-cpp.sh перелинковывает /usr/local/bin на новый
+#      nightly; свежие сборки могут ломать грамматику guided-layout surya,
+#      см. HANDOFF «Грабли»), напр. в .env:
+#      LLAMA_BIN=/usr/local/lib/llama.cpp/b11734-linux-x64-vulkan/llama-b11734/llama-server
 
 set -euo pipefail
 
@@ -71,6 +77,11 @@ PADDLE_CTX="${PADDLE_CTX:-$((PADDLE_PARALLEL * 8192))}"
 OCR_PROXY_PORT="${OCR_PROXY_PORT:-8511}"
 HOST="${SURYA_INFERENCE_HOST:-127.0.0.1}"
 WAIT_SVC="${WAIT_SVC:-600}"
+# Бинарь llama-server для всех сервисов: имя (деф.) = поиск в PATH, как раньше;
+# абсолютный путь = пин конкретной сборки. export — чтобы переживал restart
+# (он заново вызывает $0) и передавался дочерним процессам.
+LLAMA_BIN="${LLAMA_BIN:-llama-server}"
+export LLAMA_BIN
 
 SURYA_PID="/tmp/docprep-surya.pid"
 SURYA_LOG="/tmp/docprep-surya.log"
@@ -102,7 +113,7 @@ svc_owned() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
-llama_version() { llama-server --version 2>&1 | head -1 || true; }
+llama_version() { "$LLAMA_BIN" --version 2>&1 | head -1 || true; }
 
 # start_svc <имя> <pid-файл> <лог> <порт> <ожидаемый alias> <args…>
 start_svc() {
@@ -118,8 +129,13 @@ start_svc() {
       die "$name: на :$port чужая модель '$mid' (ожидалась '$alias') — останови её или смени порт"
     fi
   fi
+  # Ленивая проверка бинаря (только при старте): stop/help/check работают и без него
+  case "$LLAMA_BIN" in
+    */*) [ -x "$LLAMA_BIN" ] || { bad "$name: LLAMA_BIN не исполняемый: $LLAMA_BIN"; return 1; } ;;
+    *)   command -v "$LLAMA_BIN" >/dev/null 2>&1 || { bad "$name: $LLAMA_BIN не найден в PATH"; return 1; } ;;
+  esac
   : > "$log"
-  setsid llama-server --host "$HOST" --port "$port" "$@" \
+  setsid "$LLAMA_BIN" --host "$HOST" --port "$port" "$@" \
     >> "$log" 2>&1 < /dev/null &
   echo $! > "$pidfile"
   local pid; pid="$(cat "$pidfile")"
@@ -246,7 +262,15 @@ except Exception: print("")' 2>/dev/null || true)"
 check() {
   echo "== llama-server =="
   inf "$(llama_version)"
-  command -v llama-server >/dev/null || bad "llama-server не в PATH"
+  local bin; bin="$(command -v "$LLAMA_BIN" 2>/dev/null || true)"
+  if [ -n "$bin" ]; then
+    bin="$(readlink -f "$bin" 2>/dev/null || printf '%s' "$bin")"
+    ok "бинарь: $bin"
+    [ "$bin" = "$(readlink -f "$(command -v llama-server 2>/dev/null)" 2>/dev/null)" ] \
+      || warn "LLAMA_BIN ($bin) отличается от llama-server из PATH — это пин версии, норма если задумано"
+  else
+    bad "llama-server не найден (LLAMA_BIN='$LLAMA_BIN')"
+  fi
 
   echo "== Surya VLM (:$SURYA_PORT) — OCR/layout для marker =="
   local mid="" ; mid="$(model_id "$SURYA_PORT")"
