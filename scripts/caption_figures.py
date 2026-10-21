@@ -21,7 +21,7 @@ Env:  CAPTION_API, CAPTION_MODEL, CAPTION_API_KEY, CAPTION_PARALLEL,
       {lang} — язык слова «на русском/английском»; деф. — встроенный ниже),
       CAPTION_STRUCTURED (=1 — структурированные описания: prose + Mermaid
       + список связей для схем, pipe-MD реконструкция для таблиц; пилот
-      PLAN-VLM этап 0: 8/8 валидного Mermaid. Деф. 0 — prose-only.
+      этапа 0: 8/8 валидного Mermaid. Деф. 0 — prose-only.
       Валидация Mermaid — mmdc (npx -y @mermaid-js/mermaid-cli, нужен node;
       puppeteer --no-sandbox), ретрай x1 с текстом ошибки, фолбэк prose)
 """
@@ -273,7 +273,7 @@ LOCAL_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "[::1]")
 
 # Структурированные промпты (CAPTION_STRUCTURED=1) — по языку ответа, с ветвлением
 # по типу фигуры В ОДНОМ ВЫЗОВЕ и few-shot erDiagram БЕЗ атрибутных блоков
-# (пилот PLAN-VLM этап 0: блоки атрибутов — единственный источник ошибок
+# (пилот этапа 0: блоки атрибутов — единственный источник ошибок
 # парсинга; для RAG достаточно связей). Формат ответа — XML-теги для парсинга.
 STRUCT_PROMPTS = {
     "ru": """Ты готовишь структурированное описание изображения для полнотекстового поиска базы знаний по управлению данными. Контекст документа: {ctx}
@@ -464,7 +464,7 @@ def validate_mermaid(code):
         mmd, svg, cfg = (pathlib.Path(d) / n for n in ("x.mmd", "x.svg", "pptr.json"))
         mmd.write_text(code + "\n", encoding="utf-8")
         # Ubuntu 24.x: unprivileged userns выключен — Chromium без --no-sandbox
-        # не стартует (пилот этапа 0, PLAN-VLM §4)
+        # не стартует (пилот этапа 0)
         cfg.write_text(
             json.dumps({"args": ["--no-sandbox", "--disable-setuid-sandbox"]})
         )
@@ -497,7 +497,7 @@ def validate_mermaid(code):
 
 
 def assemble_structured(sec, lang):
-    """Секции ответа -> многострочная вставка (формат PLAN-VLM §3):
+    """Секции ответа -> многострочная вставка (prose blockquote + ```mermaid + «Связи:»):
     prose blockquote (маркер — первая строка), затем mermaid, список связей,
     таблица, неопределённости. -> (текст_вставки, outcome)."""
     edges_hdr = "Связи:" if lang == "ru" else "Edges:"
@@ -524,7 +524,7 @@ def assemble_structured(sec, lang):
 
 def describe_structured(api, alias, img_path, ctx, lang):
     """Structured-конвейер: вызов -> парсинг -> mmdc -> ретрай x1 с текстом
-    ошибки -> фолбэк prose (PLAN-VLM §5.3). -> (вставка, outcome, сек)."""
+    ошибки -> фолбэк prose. -> (вставка, outcome, сек)."""
     t0 = time.time()
     tpl = STRUCT_PROMPTS[lang]
     txt, _ = describe(api, alias, img_path, ctx, tpl, lang, structured=True)
@@ -607,7 +607,7 @@ def main():
         "--structured",
         action="store_true",
         default=os.environ.get("CAPTION_STRUCTURED", "0") == "1",
-        help="структурированные описания (PLAN-VLM): схемы -> prose + Mermaid "
+        help="структурированные описания: схемы -> prose + Mermaid "
         "+ список связей (валидация mmdc, ретрай x1, фолбэк prose), таблицы -> "
         "pipe-MD реконструкция (деф. выкл; env CAPTION_STRUCTURED=1)",
     )
@@ -761,7 +761,7 @@ def main():
         f"captioning: описано {len([1 for v in results.values() if v])}/{m_total}, "
         f"повторных ссылок {cached}, мелких/битых {tiny} -> {a.md.name}"
     )
-    if a.structured:  # статистика режима (PLAN-VLM §5.5)
+    if a.structured:  # статистика режима
         cnt = {o: 0 for o in OUTCOMES}
         for o in outcomes.values():
             cnt[o] = cnt.get(o, 0) + 1
