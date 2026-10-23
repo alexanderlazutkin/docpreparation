@@ -501,6 +501,56 @@ Paddle не поднимается, `--ocr-proxy` игнорируется. Во
 modelset 2 (СиММА 6 стр.): `chandra_block: 11, errors: 0`, cyr 97,9%, layout
 остался на surya — контракт marker не нарушен.
 
+**Почему Chandra работает ВМЕСТЕ с surya+Qwen, а не вместо них.** Marker общается
+с OCR-моделью не как с «OCR вообще», а по жёсткому API-контракту surya: каждый
+тип запроса ждёт ответ строго определённого формата, и заменить «мозг» под одним
+из вызовов можно только моделью с тем же выходным форматом:
+
+| Вызов marker | Что ждёт от модели | Кто может | Комментарий |
+|---|---|---|---|
+| Layout «Output the layout of this image as JSON…» (все страницы) | JSON surya со схемой bbox; формат закреплён **GBNF-грамматикой** (guided generation llama.cpp) | **только surya** | Chandra/Paddle выдают HTML — грамматика их ответ отклонит |
+| table_rec «Output the table rows then columns as JSON…» | JSON surya (строки/колонки) | **только surya** | та же guided-грамматика |
+| Full-page «OCR this image to HTML» (битые шрифты, сканы) | HTML с `data-bbox`-координатами — часть обучения surya | surya (Chandra даёт свой HTML с другими bbox — marker его не собирает) | HIGH_ACCURACY-путь |
+| Block-OCR «OCR this block image to HTML.» (table-fallback, формулы) | просто HTML блока — формат свободный | surya, paddle (ломает `<table>`), **chandra** ✓ | единственная точка drop-in |
+
+Поэтому модельсет 2 = **гибрид**: layout/разметку страниц и full-page чтение
+делает surya (контракт marker), а block-OCR (главная боль surya — repetition-loop
+на сложных таблицах, DMRB Table 4.19) — Chandra, чей HTML-выход marker
+потребляет напрямую. Qwen3.6-35B (:8080) остаётся, потому что это третий,
+независимый контур: captioning фигур (VLM-описания в prepare_doc.sh) и
+`--use_llm` marker (склейка кросс-страничных таблиц, постправка) — Chandra
+эти вызовы не видит (получает только кропы блоков от прокси).
+
+Полная замена «surya+Qwen → Chandra одним проходом» (Chandra сам делает
+layout+OCR+таблицы+Mermaid+alt-описания на всю страницу) технически возможна,
+но это **не подмена бэкенда, а отдельный пайплайн в обход marker**:
+chandra-HTML страницы → конвертер → MD. Статус: эксперимент (см. ниже).
+
+**Примеры (modelset):**
+
+```bash
+# дефолтный проверенный стек (то же, что без флага; MODELSET=1 в .env)
+./services.sh start --ocr-proxy
+
+# стек с Chandra в block-OCR (paddle не поднимется, --ocr-proxy игнорируется)
+./services.sh start --modelset 2
+
+# то же без LLM (быстрый тест OCR-тракта, captioning пропустится)
+./services.sh start --modelset 2 --no-llm
+
+# какой движок сейчас за block-OCR + счётчики маршрутов
+curl -s :8511/stats        # ... "block_engine": "chandra", "chandra_block": 11, ...
+
+# возврат к дефолту
+./services.sh stop && ./services.sh start --ocr-proxy
+```
+
+Приоритет: флаг `--modelset` сильнее `MODELSET` из `.env` (флаг — точечный
+запуск, `.env` — устойчивый выбор; смена набора — всегда через явный
+`stop` → `start`). Новая OCR-модель в будущем = новый код набора в
+`services.sh` (env `CHANDRA_*`/`PADDLE_*` — образец), параметры запуска
+руками запоминать не нужно.
+
 **Грабли и решения (важно для новых моделей на Qwen3.5-VL):**
 
 - **Thinking-режим**: GGUF-шаблон Qwen3.5 включает `<think>` по умолчанию —
@@ -522,10 +572,8 @@ surya сам повторяется на диаграммах («Система 
 16,5 vs 23,8с на англ. таблице). Решение о смене дефолта — после пилота на
 реальных потоках документов.
 
-Ограничение: chandra задействована **только в block-OCR** (table-fallback,
-формулы). Layout/full-page остаются на surya — контракт marker (guided-JSON)
-умеет давать только surya. Full-page Chandra (layout-HTML одним проходом,
-замена whole-pipeline) — отдельный эксперимент, гейт-скрипт готов:
+Инструмент для full-page-эксперимента Chandra (см. таблицу контрактов выше) —
+гейт-скрипт с официальным layout-промптом и таймингами:
 `uv run python scripts/chandra_gate_test.py --pages "файл.pdf:10-15" --workers 4`.
 
 
