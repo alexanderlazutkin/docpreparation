@@ -10,10 +10,15 @@
 #      32.7 ГБ; склейка кросс-страничных таблиц, постправка, чтение схем).
 #
 # Usage:
+#   ./services.sh start [--modelset N] [опции]   # N=1 (деф.): surya+LLM,
+#                                       # [--ocr-proxy] добавляет Paddle+прокси;
+#                                       # N=2: surya+Chandra (:8513)+прокси
+#                                       # (block-OCR->chandra) +LLM; paddle
+#                                       # не поднимается, --ocr-proxy не нужен
 #   ./services.sh start [--no-llm] [--llm-model PATH] [--llm-parallel N]   # N деф. 2
 #                                       # surya (+ LLM, если не --no-llm);
 #                                       # --llm-parallel — слоты LLM-сервера
-#   ./services.sh start [--ocr-proxy]   # РЕКОМЕНДУЕТСЯ: + PaddleOCR-VL (:8512)
+#   ./services.sh start [--ocr-proxy]   # modelset 1: + PaddleOCR-VL (:8512)
 #                                       # и прокси-адаптер (:8511,
 #                                       # scripts/ocr_proxy.py): marker аттачится
 #                                       # к прокси; все пути идут на surya
@@ -27,20 +32,31 @@
 #                                       # datalab-to/surya-ocr-2 (тест GLM-OCR,
 #                                       # PaddleOCR-VL); N деф. 8 (SURYA_PARALLEL)
 #   ./services.sh stop [--no-llm]                       # остановка только своих сервисов
-#   ./services.sh restart [--no-llm] [--llm-model PATH] [--llm-parallel N]
+#   ./services.sh restart [--modelset N] [--no-llm] [--llm-model PATH] [--llm-parallel N]
 #                       [--surya-model PATH] [--surya-mmproj PATH] [--surya-parallel N]
 #   ./services.sh check [--deep]                         # статус; --deep = проба генерации
+#
+# Наборы моделей (MODELSET):
+#   1 (деф.) — surya-2 :8510 (layout/OCR) + [--ocr-proxy: Paddle :8512, прокси
+#              :8511 pass-through] + Qwen3.6-35B-A3B :8080 (--use_llm, captioning)
+#   2        — surya-2 :8510 (layout/table для marker) + Chandra OCR 2 :8513
+#              (block-OCR за прокси :8511, layout-HTML с таблицами/alt) +
+#              Qwen3.6-35B-A3B :8080. Гейты Chandra: USAGE §3.7 (кириллица
+#              97,5-100%, таблицы DMRB Table 4.19 ок, 13,6 с/стр @ parallel 4)
 #
 # Сервис считается «своим», если запущен этим скриптом (pid-файл). Чужой
 # llama-server на том же порту не останавливается; при несовпадении имени
 # модели на порту — ошибка (marker откажется аттачиться).
 #
 # Модели и порты (переопределяются окружением или .env):
+#   MODELSET=1 (деф.; набор запускаемых OCR-сервисов, см. выше)
 #   SURYA_MODEL / SURYA_MMPROJ  (деф. /media/llm/Models/OCR/surya-ocr-2-gguf/…)
 #   SURYA_PORT=8510  SURYA_PARALLEL=8  SURYA_CTX=parallel×12288
 #   PADDLE_MODEL / PADDLE_MMPROJ (деф. /media/llm/Models/OCR/PaddleOCR-VL-1.6/…)
 #   PADDLE_PORT=8512  PADDLE_PARALLEL=8  PADDLE_CTX=parallel×8192
-#   OCR_PROXY_PORT=8511 (scripts/ocr_proxy.py, --ocr-proxy)
+#   CHANDRA_MODEL / CHANDRA_MMPROJ (деф. /media/llm/Models/OCR/chandra-ocr-2-gguf/…)
+#   CHANDRA_PORT=8513  CHANDRA_PARALLEL=4  CHANDRA_CTX=parallel×8192
+#   OCR_PROXY_PORT=8511 (scripts/ocr_proxy.py, --ocr-proxy / modelset 2)
 #   LLM_MODEL (деф. /media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf)
 #   LLM_MMPROJ (деф. mmproj-F32.gguf рядом с моделью; пусто = текст-only сервис)
 #   LLM_PORT=8080  LLM_CTX=32768  LLM_PARALLEL=2 (35B: 2 слота × 16k)
@@ -74,6 +90,12 @@ PADDLE_ALIAS="PaddleOCR-VL-1.6"
 PADDLE_PORT="${PADDLE_PORT:-8512}"
 PADDLE_PARALLEL="${PADDLE_PARALLEL:-8}"
 PADDLE_CTX="${PADDLE_CTX:-$((PADDLE_PARALLEL * 8192))}"
+CHANDRA_MODEL="${CHANDRA_MODEL:-/media/llm/Models/OCR/chandra-ocr-2-gguf/chandra-ocr-2.Q8_0.gguf}"
+CHANDRA_MMPROJ="${CHANDRA_MMPROJ:-/media/llm/Models/OCR/chandra-ocr-2-gguf/chandra-ocr-2.mmproj-Q8_0.gguf}"
+CHANDRA_ALIAS="chandra-ocr-2"
+CHANDRA_PORT="${CHANDRA_PORT:-8513}"
+CHANDRA_PARALLEL="${CHANDRA_PARALLEL:-4}"
+CHANDRA_CTX="${CHANDRA_CTX:-$((CHANDRA_PARALLEL * 8192))}"
 OCR_PROXY_PORT="${OCR_PROXY_PORT:-8511}"
 HOST="${SURYA_INFERENCE_HOST:-127.0.0.1}"
 WAIT_SVC="${WAIT_SVC:-600}"
@@ -89,6 +111,8 @@ LLM_PID="/tmp/docprep-llm.pid"
 LLM_LOG="/tmp/docprep-llm.log"
 PADDLE_PID="/tmp/docprep-paddle.pid"
 PADDLE_LOG="/tmp/docprep-paddle.log"
+CHANDRA_PID="/tmp/docprep-chandra.pid"
+CHANDRA_LOG="/tmp/docprep-chandra.log"
 PROXY_PID="/tmp/docprep-proxy.pid"
 PROXY_LOG="/tmp/docprep-proxy.log"
 
@@ -210,6 +234,16 @@ start_paddle() {
     --alias "$PADDLE_ALIAS" --jinja
 }
 
+start_chandra() {
+  [ -f "$CHANDRA_MODEL" ]  || die "chandra: модель не найдена: $CHANDRA_MODEL"
+  [ -f "$CHANDRA_MMPROJ" ] || die "chandra: mmproj не найден: $CHANDRA_MMPROJ"
+  inf "chandra: $CHANDRA_MODEL (+ mmproj), parallel=$CHANDRA_PARALLEL, ctx=$CHANDRA_CTX"
+  start_svc chandra "$CHANDRA_PID" "$CHANDRA_LOG" "$CHANDRA_PORT" "$CHANDRA_ALIAS" \
+    -m "$CHANDRA_MODEL" --mmproj "$CHANDRA_MMPROJ" \
+    -ngl 99 --parallel "$CHANDRA_PARALLEL" --ctx-size "$CHANDRA_CTX" \
+    --alias "$CHANDRA_ALIAS" --jinja
+}
+
 proxy_up() {  # /health прокси = оба бэкенда живы
   curl -sf -m 3 "http://$HOST:$OCR_PROXY_PORT/health" >/dev/null 2>&1
 }
@@ -224,16 +258,19 @@ start_proxy() {
   [ -f "$ROOT/scripts/ocr_proxy.py" ] || die "ocr-proxy: нет scripts/ocr_proxy.py"
   : > "$PROXY_LOG"
   setsid env SURYA_URL="http://$HOST:$SURYA_PORT" PADDLE_URL="http://$HOST:$PADDLE_PORT" \
+    CHANDRA_URL="http://$HOST:$CHANDRA_PORT" \
     OCR_PROXY_PORT="$OCR_PROXY_PORT" SURYA_ALIAS="$SURYA_ALIAS" PADDLE_ALIAS="$PADDLE_ALIAS" \
+    CHANDRA_ALIAS="$CHANDRA_ALIAS" \
     OCR_PROXY_BLOCK_ENGINE="${OCR_PROXY_BLOCK_ENGINE:-surya}" \
     "$ROOT/.venv/bin/python" "$ROOT/scripts/ocr_proxy.py" \
     >> "$PROXY_LOG" 2>&1 < /dev/null &
   echo $! > "$PROXY_PID"
   local pid; pid="$(cat "$PROXY_PID")"
   inf "ocr-proxy: pid $pid, :$OCR_PROXY_PORT, лог: $PROXY_LOG"
+  local route_info="block-OCR→${OCR_PROXY_BLOCK_ENGINE:-surya}"
   local i
   for i in $(seq 1 60); do
-    if proxy_up; then ok "ocr-proxy: :$OCR_PROXY_PORT готов (layout/table→surya :$SURYA_PORT, block-OCR→paddle :$PADDLE_PORT)"; return 0; fi
+    if proxy_up; then ok "ocr-proxy: :$OCR_PROXY_PORT готов (layout/table→surya :$SURYA_PORT, $route_info)"; return 0; fi
     if ! kill -0 "$pid" 2>/dev/null; then
       bad "ocr-proxy: процесс умер, последние строки лога:"; tail -5 "$PROXY_LOG"; return 1
     fi
@@ -242,13 +279,17 @@ start_proxy() {
   bad "ocr-proxy: не поднялся за 60s (лог: $PROXY_LOG)"; return 1
 }
 
-# deep_chat <порт> <модель> — проба генерации (max_tokens 300: thinking-модели
-# тратят бюджет на reasoning до content)
+# deep_chat <порт> <модель> [extra-kv] — проба генерации (max_tokens 300:
+# thinking-модели тратят бюджет на reasoning до content; extra-kv — доп.
+# поля JSON без внешних скобок, напр. '"chat_template_kwargs":{"enable_thinking":false}')
 deep_chat() {
-  local port="$1" model="$2"
+  local port="$1" model="$2" extra="${3:-}"
+  local body="{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Ответь одним словом: работает\"}],\"max_tokens\":300"
+  [ -n "$extra" ] && body="$body,$extra"
+  body="$body}"
   local out; out="$(curl -s -m 300 "http://$HOST:$port/v1/chat/completions" \
     -H 'Content-Type: application/json' \
-    -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Ответь одним словом: работает\"}],\"max_tokens\":300}" | \
+    -d "$body" | \
     python3 -c 'import json,sys
 try:
     m=json.load(sys.stdin)["choices"][0]["message"]
@@ -294,14 +335,27 @@ check() {
     inf "не запущен (нужен только для --ocr-proxy; ./services.sh start --ocr-proxy)"
   fi
 
+  echo "== Chandra OCR 2 (:$CHANDRA_PORT) — block-OCR через прокси (modelset 2) =="
+  mid="$(model_id "$CHANDRA_PORT")"
+  if [ -n "$mid" ]; then
+    if svc_owned "$CHANDRA_PORT" "$CHANDRA_PID"; then ok "запущен этим скриптом (pid $(cat "$CHANDRA_PID"))"
+    else ok "запущен внешне (этот скрипт его не остановит)"; fi
+    ok "модель: $mid"
+  else
+    inf "не запущен (нужен только для modelset 2; ./services.sh start --modelset 2)"
+  fi
+
   echo "== OCR-прокси (:$OCR_PROXY_PORT) =="
   if proxy_up; then
     if svc_owned "$OCR_PROXY_PORT" "$PROXY_PID"; then ok "запущен этим скриптом (pid $(cat "$PROXY_PID"))"
     else ok "запущен внешне (этот скрипт его не остановит)"; fi
-    ok "маршрут: layout/table_rec→surya :$SURYA_PORT, block-OCR→paddle :$PADDLE_PORT"
+    local pengine; pengine="$(curl -s -m 3 "http://$HOST:$OCR_PROXY_PORT/stats" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("block_engine","?"))
+except Exception: print("?")' 2>/dev/null || echo '?')"
+    ok "маршрут: layout/table_rec→surya :$SURYA_PORT, block-OCR→$pengine"
     inf "prepare_doc.sh аттачится сюда автоматически; статистика: curl :$OCR_PROXY_PORT/stats"
   else
-    inf "не запущен (./services.sh start --ocr-proxy)"
+    inf "не запущен (./services.sh start --ocr-proxy | --modelset 2)"
   fi
 
   echo "== LLM для --use_llm (:$LLM_PORT) =="
@@ -322,19 +376,24 @@ check() {
     echo "== Deep-пробы генерации =="
     mid="$(model_id "$SURYA_PORT")"; [ "$mid" = "$SURYA_ALIAS" ] && deep_chat "$SURYA_PORT" "$mid"
     mid="$(model_id "$LLM_PORT")";    [ -n "$mid" ] && deep_chat "$LLM_PORT" "$mid"
+    mid="$(model_id "$CHANDRA_PORT")"; [ -n "$mid" ] && deep_chat "$CHANDRA_PORT" "$mid" \
+      '"chat_template_kwargs":{"enable_thinking":false}'
   fi
 }
 
 # ------------------------------------------------------------------ main ----
 
 CMD="help"; [ $# -gt 0 ] && CMD="$1"; shift || true
-DEEP=0 NO_LLM=0 OCR_PROXY=0 PARALLEL_GIVEN=0 MODEL_GIVEN=0
+DEEP=0 NO_LLM=0 OCR_PROXY=0 PARALLEL_GIVEN=0 MODEL_GIVEN=0 MODELSET_GIVEN=0
 S_PARALLEL_GIVEN=0 S_MODEL_GIVEN=0 S_MMPROJ_GIVEN=0
+MODELSET="${MODELSET:-1}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1; shift ;;
     --no-llm) NO_LLM=1; shift ;;
     --ocr-proxy) OCR_PROXY=1; shift ;;
+    --modelset) MODELSET="${2:?--modelset требует значение}"; MODELSET_GIVEN=1; shift 2 ;;
+    --modelset=*) MODELSET="${1#*=}"; MODELSET_GIVEN=1; shift ;;
     --llm-model) LLM_MODEL="${2:?--llm-model требует значение}"; MODEL_GIVEN=1; shift 2 ;;
     --llm-model=*) LLM_MODEL="${1#*=}"; MODEL_GIVEN=1; shift ;;
     --llm-parallel) LLM_PARALLEL="${2:?--llm-parallel требует значение}"; PARALLEL_GIVEN=1; shift 2 ;;
@@ -350,6 +409,14 @@ while [ $# -gt 0 ]; do
 done
 [ "${LLM_PARALLEL:-2}" -ge 1 ] 2>/dev/null || die "--llm-parallel: ожидается целое >= 1"
 [ "${SURYA_PARALLEL:-8}" -ge 1 ] 2>/dev/null || die "--surya-parallel: ожидается целое >= 1"
+case "$MODELSET" in
+  1) ;;
+  2) if [ "$OCR_PROXY" = 1 ]; then
+       warn "--ocr-proxy игнорируется в modelset 2 (прокси поднимается сам, paddle не нужен)"
+       OCR_PROXY=0
+     fi ;;
+  *) die "--modelset: ожидается 1 (surya+paddle+LLM) или 2 (surya+chandra+LLM), получено '$MODELSET'" ;;
+esac
 [ "$S_PARALLEL_GIVEN" = 1 ] && SURYA_CTX="$((SURYA_PARALLEL * 12288))"  # пересчёт под слоты
 if [ "$S_MODEL_GIVEN" = 1 ] && [ "$S_MMPROJ_GIVEN" = 0 ]; then
   die "--surya-model требует также --surya-mmproj (mmproj обязателен для VLM)"
@@ -357,9 +424,12 @@ fi
 
 case "$CMD" in
   start)
-    echo "== Start =="
+    echo "== Start (modelset=$MODELSET) =="
     start_surya || true
-    if [ "$OCR_PROXY" = 1 ]; then
+    if [ "$MODELSET" = 2 ]; then
+      start_chandra || true
+      OCR_PROXY_BLOCK_ENGINE="chandra" start_proxy || true
+    elif [ "$OCR_PROXY" = 1 ]; then
       start_paddle || true
       start_proxy || true
     fi
@@ -370,6 +440,7 @@ case "$CMD" in
     echo "== Stop =="
     stop_svc ocr-proxy "$PROXY_PID" "$OCR_PROXY_PORT"
     stop_svc paddle "$PADDLE_PID" "$PADDLE_PORT"
+    stop_svc chandra "$CHANDRA_PID" "$CHANDRA_PORT"
     stop_svc llm "$LLM_PID" "$LLM_PORT"
     if [ "$NO_LLM" = 1 ]; then inf "surya не трогаем (--no-llm)"; else stop_svc surya "$SURYA_PID" "$SURYA_PORT"; fi
     ;;
@@ -382,11 +453,12 @@ case "$CMD" in
     SP=""; [ "$S_MMPROJ_GIVEN" = 1 ] && SP="--surya-mmproj $SURYA_MMPROJ"
     SL=""; [ "$S_PARALLEL_GIVEN" = 1 ] && SL="--surya-parallel $SURYA_PARALLEL"
     OP=""; [ "$OCR_PROXY" = 1 ] && OP="--ocr-proxy"
+    MS=""; [ "$MODELSET_GIVEN" = 1 ] && MS="--modelset $MODELSET"
     "$0" stop $NL
-    "$0" start $NL $LM $LP $SM $SP $SL $OP
+    "$0" start $NL $LM $LP $SM $SP $SL $OP $MS
     ;;
   check|status) check ;;
   help|-h|--help|*)
-    sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,51p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     ;;
 esac

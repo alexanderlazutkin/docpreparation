@@ -13,18 +13,27 @@ description: Подготовка PDF к загрузке в базу знани
 
 ## Сервисы inference (`services.sh`)
 ```bash
-./services.sh start --ocr-proxy # РЕКОМЕНДУЕТСЯ: surya :8510 + Paddle :8512 + прокси :8511
-                                 # + LLM/VLM :8080 (Qwen3.6-35B-A3B + mmproj-F32, 32,7 ГБ)
+./services.sh start --ocr-proxy # MODELSET 1 (деф., РЕКОМЕНДУЕТСЯ): surya :8510 + Paddle :8512
+                                 # + прокси :8511 + LLM/VLM :8080 (Qwen3.6-35B-A3B + mmproj-F32, 32,7 ГБ)
+./services.sh start --modelset 2 # MODELSET 2: surya (layout/table) + Chandra OCR 2 :8513
+                                 # (block-OCR за прокси :8511) + LLM :8080; paddle не нужен
 ./services.sh check --deep      # статус + проба генерации
 ./services.sh stop              # остановить свои (чужой llama-server не трогает)
 ```
+- `--modelset N` — код набора моделей (деф. 1; в .env: `MODELSET=1`):
+  **1** = surya + `--ocr-proxy` (Paddle, прокси-pass-through) + Qwen;
+  **2** = surya + Chandra (block-OCR, layout-HTML с таблицами/Mermaid,
+  гейты пройдены — USAGE §3.7). Новая модель → новый код в services.sh,
+  параметры запуска не запоминать руками.
 - `--ocr-proxy` — OCR-стек с прокси-адаптером: marker аттачится к прокси :8511,
   все пути идут на surya (прозрачный pass-through), PaddleOCR-VL (:8512) поднят
   рядом. block-OCR на Paddle — только экспериментально через
   `OCR_PROXY_BLOCK_ENGINE=paddle` (ломает table-fallback: Paddle даёт plain
   без <table>, аддендум-4 USAGE). Роутинг автоматический по содержимому,
   флаг безопасен на любом PDF; без флага — обычный режим (только surya),
-  отдельного `--no-ocr-proxy` нет. Статистика маршрутов: `curl :8511/stats`.
+  отдельного `--no-ocr-proxy` нет. В modelset 2 флаг игнорируется
+  (прокси поднимается сам с block-OCR→chandra). Статистика маршрутов:
+  `curl :8511/stats` (включая block_engine).
 - `prepare_doc.sh` сам аттачится к OCR-стеку (прокси :8511 приоритетнее surya
   :8510) и запускает
   **captioning фигур** через LLM-сервис (VLM-описания после каждой картинки — графика

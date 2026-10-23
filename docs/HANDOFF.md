@@ -186,6 +186,20 @@
   каждом прогоне пайплайна без рестарта. `CAPTION_STRUCTURED=1` — теперь
   рабочий режим по умолчанию.
 
+## Текущее состояние (2026-10-23)
+- **Chandra OCR 2: гейты пройдены, интеграция выполнена (2026-10-23)**. Все 3
+  гейта PASS (кириллица 97,5–100%, таблицы DMRB Table 4.19 полные, 13,6 с/стр
+  @ parallel 4 = 1,3x surya); движок `chandra` в `ocr_proxy.py` (промпт-подмена
+  на официальный OCR_PROMPT + `enable_thinking:false` + повтор-гвард с ретраем
+  без mermaid); `services.sh --modelset N` (1 = прежний стек, деф.; 2 = surya +
+  Chandra :8513 + прокси block→chandra + LLM). Сквозной прогон marker на
+  modelset 2: `chandra_block: 11, errors: 0`, cyr 97,9%. Детали/грабли —
+  USAGE §3.7. Качество против surya на реальных потоках — пилот за
+  пользователем (A/B: `scripts/ab_block_ocr.py`).
+- `scripts/chandra_gate_test.py` — переносимый гейт-скрипт (render → официальный
+  промпт → тайминги; `--workers 4` для throughput).
+- П.6 (публикация GitHub) — следующий шаг, чеклист ниже.
+
 ## Текущее состояние (2026-10-21)
 - **ГЛАВНЫЙ ПРИЁМОЧНЫЙ ТЕСТ ПРОЙДЕН (2026-10-21, подтверждено пользователем)**:
   готовые MD загружены в БЗ Cherry Studio, реальные поисковые запросы работают
@@ -309,21 +323,29 @@
      чистый stop, битый путь → понятный FAIL. Доки: шапка services.sh,
      .env.example «Прочее (сервисы)». Пока пин НЕ установлен — при
      обновлении llama.cpp задать его в .env ДО запуска install-скрипта.
-   Этап 1 — standalone-гейты (llama-server на :8513 текущим бинарём b11734):
-   - Гейт-1 кириллица: выборка «СиММА»/«Рекомендации ФР» vs эталон surya
-     (cyr%, потери текста) — именно тут пал GLM-OCR.
-   - Гейт-2 таблицы: DMRB Vol.1 стр. 161–170 (Table 4.19: у surya
-     repetition-loop, Paddle терял `<table>`).
-   - Скорость: с/стр vs surya 10,5 / Paddle 5,5.
-   Этап 2 — интеграция (только при пройденных гейтах):
-   - `services.sh --chandra` (:8513, паттерн Paddle) + движок `chandra` в
-     `ocr_proxy.py` (whitelist surya|paddle расширить); A/B
-     `scripts/ab_block_ocr.py` на тяжёлых таблицах; при устойчивом выигрыше —
-     `OCR_PROXY_BLOCK_ENGINE=chandra`. Итог → COMPARISON §4.5 «статус у нас»,
-     USAGE §3.6 аддендум-5.
-   Приёмка: cyr ≥ ~90% на RU-выборке, таблицы не теряются, скорость ≤ 2× surya.
-   Риски: лицензия OpenRAIL-M (ок до $2M); качество community-mmproj;
-   Vulkan/iGUI-скорость на 5,3B.
+    Этап 1 — standalone-гейты (llama-server на :8513 текущим бинарём b11734):
+    - [x] Гейт-1 кириллица — PASS 2026-10-23: 97,5–100% (СиММА ×3, Рек.ФР ×2);
+      p15 64,6% из-за англ. переводов в описании диаграммы (норма); читает
+      слова, сломанные в текст-слое (битые ToUnicode).
+    - [x] Гейт-2 таблицы — PASS 2026-10-23: DMRB Vol.1 Table 4.19 (p.165)
+      полная сетка 9 колонок × 3 строки, значения сверены с нарративом
+      документа; 4.17 (p.161) и 4.18 (p.163) тоже с `<tr>`.
+    - [x] Скорость — PASS 2026-10-23 при parallel=4: throughput 13,6 с/стр
+      (гейт ≤ 2× surya 10,5); без патологической p.164 ~10 с/стр; латентность
+      одиночной стр. 12–30 с (текст), до 205 с (ER-диаграмма с деградацией).
+    Этап 2 — интеграция (только при пройденных гейтах):
+    - [x] ВЫПОЛНЕНО 2026-10-23: `services.sh --modelset 2` (паттерн обобщён
+      на наборы моделей; 1 = деф. прежний стек) + движок `chandra` в
+      `ocr_proxy.py` (официальный промпт, thinking off, повтор-гвард с
+      ретраем ×1 без mermaid, счётчик `chandra_retries` в /stats) + A/B
+      `scripts/ab_block_ocr.py` (движок из /stats) + сквозной прогон marker
+      (chandra_block: 11, errors: 0, cyr 97,9%). Доки: USAGE §3.7, README
+      (таблица modelset), SKILL.md. Осталось: пилот качества на реальных
+      потоках (пользователь); при устойчивом выигрыше — `MODELSET=2` в .env.
+    Приёмка: cyr ≥ ~90% на RU-выборке ✓, таблицы не теряются ✓, скорость
+    ≤ 2× surya ✓ (все три — 2026-10-23, scripts/chandra_gate_test.py).
+    Риски: лицензия OpenRAIL-M (ок до $2M); качество community-mmproj;
+    Vulkan/iGUI-скорость на 5,3B.
 5. [ ] Опционально (бэклог): инъекция фигур Vol.3 из EPUB в MD; эксперимент A
    (fast на чистом цифровом); этап 3 README (MinerU).
 6. [ ] **Публикация проекта (решение пользователя 2026-10-21): по завершении
@@ -392,7 +414,8 @@
 | Сервисы / пайплайн | `services.sh`, `scripts/{launch_batch,prepare_all,prepare_doc}.sh` |
 | QC / captioning / cleanup | `scripts/{qc_check,caption_figures,clean_md}.py` |
 | Склейка фрагментов (авто при K>1) | `scripts/merge_fragments.py` |
-| OCR-прокси (гибрид surya+Paddle) + A/B | `scripts/ocr_proxy.py`, `scripts/ab_block_ocr.py` |
+| OCR-прокси (гибрид surya+Paddle+Chandra) + A/B | `scripts/ocr_proxy.py`, `scripts/ab_block_ocr.py` |
+| Гейт-тест Chandra (кириллица/таблицы/скорость) | `scripts/chandra_gate_test.py` (USAGE §3.7) |
 | Тайминги (ETA-калибровка) | `logs/timings.jsonl` |
 | Пилот структурированных VLM-описаний (этап 0) | `outbox/vlm_pilot/` (report.md, results/, svg/) |
 | Ретраи ремонта таблиц (сессия 17.10) | `outbox/vlm_pilot/tabrepair/` |

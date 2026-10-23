@@ -62,7 +62,8 @@ inbox/*.pdf ──► [1/6] marker (balanced) ──► [1.5] авто-ремо�
 ```bash
 cp .env.example .env          # пути к GGUF-моделям (+ опц. облако captioning)
 uv sync                       # .venv (marker-pdf), глобальный Python не трогается
-./services.sh start --ocr-proxy   # surya :8510 + Paddle :8512 + Qwen :8080
+./services.sh start --ocr-proxy   # modelset 1: surya :8510 + Paddle :8512 + Qwen :8080
+./services.sh start --modelset 2  # modelset 2: surya + Chandra :8513 + прокси + Qwen
 
 cp файл(ы).pdf inbox/
 scripts/launch_batch.sh       # пакет: видимое окно, логи logs/batch_latest.*
@@ -83,17 +84,25 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 
 ## Компоненты
 
-| Компонент | Роль |
-|---|---|
+| Компонент                                                           | Роль                                                                    |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | [marker-pdf](https://github.com/datalab-to/marker) 2.x (Apache-2.0) | ядро конвертации: layout, таблицы, пагинация (`paginate_output` → `⌗p`) |
-| [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M) | OCR/layout VLM; локально: `/media/llm/Models/OCR/surya-ocr-2-gguf` |
-| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan) | inference-серверы: surya `:8510`, Paddle `:8512`, Qwen `:8080` |
-| Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32) | captioning/VLM-описания; p=2 (5,4 с/фигура) |
-| PaddleOCR-VL-1.6 (GGUF) | block-OCR за прокси (деф. выключен: `OCR_PROXY_BLOCK_ENGINE=surya`) |
-| poppler (`pdfinfo`, `pdftoppm`, `pdftotext`) | метаданные, рендеры, текст-слой |
-| node + mmdc (Mermaid CLI) | валидация Mermaid в структур. режиме captioning |
-| uv | изолированное окружение проекта (`.venv`, `uv.lock`) |
-| opencode + skill `.opencode/skills/docprep/` | агент ведёт пайплайн (версионируется в репо) |
+| [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M)   | OCR/layout VLM; локально: `/media/llm/Models/OCR/surya-ocr-2-gguf`      |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan)         | inference-серверы: surya `:8510`, Paddle `:8512`, Chandra `:8513`, Qwen `:8080` |
+| Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32)                               | captioning/VLM-описания; p=2 (5,4 с/фигура)                             |
+| PaddleOCR-VL-1.6 (GGUF)                                             | block-OCR за прокси (деф. выключен: `OCR_PROXY_BLOCK_ENGINE=surya`)     |
+| [Chandra OCR 2](https://github.com/datalab-to/chandra) (GGUF Q8_0)  | block-OCR за прокси, modelset 2: layout-HTML с таблицами/Mermaid/alt; локально: `/media/llm/Models/OCR/chandra-ocr-2-gguf` |
+| poppler (`pdfinfo`, `pdftoppm`, `pdftotext`)                        | метаданные, рендеры, текст-слой                                         |
+| node + mmdc (Mermaid CLI)                                           | валидация Mermaid в структур. режиме captioning                         |
+| uv                                                                  | изолированное окружение проекта (`.venv`, `uv.lock`)                    |
+| opencode + skill `.opencode/skills/docprep/`                        | агент ведёт пайплайн (версионируется в репо)                            |
+
+Наборы запуска (`services.sh --modelset N`, деф. 1; подробности — USAGE §2.1):
+
+| modelset | Состав | Когда |
+| --- | --- | --- |
+| 1 | surya + `--ocr-proxy`: Paddle + прокси-pass-through + Qwen | деф.; проверенный стек |
+| 2 | surya (layout/table) + Chandra `:8513` (block-OCR за прокси) + Qwen | эксперименты block-OCR Chandra (гейты — USAGE §3.7) |
 
 ## Особенности железа и ограничения
 
@@ -103,7 +112,7 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
   недоступен (сирота ест VRAM) — поднимай сервисы через `services.sh` до запуска.
 - Границы Cherry Studio: открытых API добавления материалов нет — финальная
   загрузка `.md` в БЗ через UI; повторно проверить реальными поисковыми запросами.
-- Смена набора сервисов (`--ocr-proxy`, `--surya-*`) — только через явный
+- Смена набора сервисов (`--ocr-proxy`, `--modelset`, `--surya-*`) — только через явный
   `./services.sh stop` → `start` (restart с `--no-llm` не трогает surya).
 
 ## Документы

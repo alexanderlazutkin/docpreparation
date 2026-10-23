@@ -83,12 +83,13 @@ tail -f logs/batch_latest.log          # стадии + факт-скорост�
 | Команда                                                                               | Что делает                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `./services.sh start`                                                                 | surya + LLM/VLM на GPU (Vulkan) — без адаптера; рекомендуемый старт: `start --ocr-proxy` (§1)                                                                                                                                                                                                                            |
+| `./services.sh start --modelset N`                                                     | набор моделей (деф. 1): **1** = surya + `--ocr-proxy` (Paddle+прокси) + LLM; **2** = surya (layout/table) + Chandra OCR 2 (:8513, block-OCR за прокси) + LLM, paddle не поднимается, `--ocr-proxy` игнорируется (прокси поднимается сам); гейты Chandra — §3.7                                                           |
 | `./services.sh start --llm-parallel 3`                                                | слотов LLM-сервера (деф. 2)                                                                                                                                                                                                                                                                                              |
 | `./services.sh start --llm-model <путь.gguf>`                                         | другая LLM (например, более производительная)                                                                                                                                                                                                                                                                            |
 | `./services.sh start --no-llm`                                                        | только surya (captioning будет пропущен)                                                                                                                                                                                                                                                                                 |
-| `./services.sh start --ocr-proxy [--no-llm]`                                          | рекомендуемый старт: + PaddleOCR-VL (:8512) и прокси-адаптер (:8511) — все пути на surya (прозрачный pass-through), Paddle рядом; `OCR_PROXY_BLOCK_ENGINE=paddle` — экспериментальный block-OCR на Paddle (§3.6 аддендум-4); `prepare_doc.sh` цепляется к прокси автоматически; статистика маршрутов: `curl :8511/stats` |
+| `./services.sh start --ocr-proxy [--no-llm]`                                          | рекомендуемый старт (modelset 1): + PaddleOCR-VL (:8512) и прокси-адаптер (:8511) — все пути на surya (прозрачный pass-through), Paddle рядом; `OCR_PROXY_BLOCK_ENGINE=paddle` — экспериментальный block-OCR на Paddle (§3.6 аддендум-4); `prepare_doc.sh` цепляется к прокси автоматически; статистика маршрутов: `curl :8511/stats` |
 | `./services.sh start --surya-model X.gguf --surya-mmproj Y.gguf [--surya-parallel N]` | подмена OCR-VLM за алиасом surya (тест GLM-OCR/PaddleOCR-VL; выводы — §3.6)                                                                                                                                                                                                                                              |
-| `./services.sh restart` / `stop`                                                      | рестарт/остановка своих сервисов (чужие не трогает)                                                                                                                                                                                                                                                                      |
+| `./services.sh restart [--modelset N]` / `stop`                                       | рестарт/остановка своих сервисов (чужие не трогает; stop останавливает и chandra)                                                                                                                                                                                                                                        |
 | `./services.sh check --deep`                                                          | статус + проба генерации; печатает готовые флаги `--use_llm`                                                                                                                                                                                                                                                             |
 
 ### 2.2 Пакетная обработка — `prepare_all.sh` (через `launch_batch.sh`)
@@ -474,6 +475,58 @@ full-page), а marker'у нужен `<table>`-HTML → `clean_table_html` отк
 table-fallback будет падать — A/B-качество текста при этом равное §3.6-2).
 Paddle-сервис поднимается и в дефолте: переключение движка — перезапуск
 только прокси (`./services.sh restart --ocr-proxy`), не всего стека.
+
+
+### 3.7 Chandra OCR 2 как block-OCR движок (modelset 2, 2026-10-23)
+
+[Chandra 2](https://huggingface.co/vasu-12/chandra-ocr-2) — OCR-модель Datalab
+(авторы marker/surya), ~5,3B на базе Qwen3.5-VL. В отличие от Paddle (аддендум-4)
+даёт **тот же HTML-контракт, что нужен marker**: `<table>` с colspan/rowspan,
+`<p>/<b>/<ul>` + layout-блоки `data-bbox`/`data-label` + alt-описания картинок
+и Mermaid-конверсию диаграмм — т.е. table-fallback **не ломается**.
+
+**Гейты приёмки (пройдены 2026-10-23, scripts/chandra_gate_test.py):**
+
+| Гейт | Результат |
+|---|---|
+| Загрузка mtmd (mmproj) | PASS — vision-погрузчик llama.cpp b11734 работает |
+| Кириллица ≥90% | PASS — СиММА/Рек.ФР: 97,5–100% (p15 64,6% из-за англ. переводов внутри описания диаграммы — норма); читает слова, сломанные в текст-слое PDF (битые ToUnicode) |
+| Таблицы | PASS — DMRB Vol.1: Table 4.19 (p.165) полная сетка 9 колонок × 3 строки, значения сверены с нарративом; 4.17/4.18 тоже с `<tr>` |
+| Скорость ≤2x surya (10,5 с/стр) | PASS при parallel=4: throughput 13,6 с/стр (1,3x); без патологических страниц ~10 с/стр; агрегатная генерация 101 t/s |
+
+**Запуск:** `./services.sh start --modelset 2` — surya :8510 (layout/table для
+marker) + Chandra :8513 + прокси :8511 с `block-OCR→chandra` + LLM :8080.
+Paddle не поднимается, `--ocr-proxy` игнорируется. Возврат к дефолту:
+`./services.sh stop && ./services.sh start --ocr-proxy`. Прогон marker на
+modelset 2 (СиММА 6 стр.): `chandra_block: 11, errors: 0`, cyr 97,9%, layout
+остался на surya — контракт marker не нарушен.
+
+**Грабли и решения (важно для новых моделей на Qwen3.5-VL):**
+
+- **Thinking-режим**: GGUF-шаблон Qwen3.5 включает `<think>` по умолчанию —
+  весь ответ уходит в `reasoning_content`, `content` пустой. Лечится
+  `"chat_template_kwargs": {"enable_thinking": false}` (НЕ `"thinking"` —
+  шаблон такое игнорирует). Прокси ставит это автоматически для chandra.
+- **Деградация повторами на ER-диаграммах** (DMRB p.164): одна mermaid-строка
+  ×10+, обрыв max_tokens за 157–205 с. Прокси детектит (finish_reason=length
+  или строка ≥20 симв. ×5) и делает ретрай ×1 с суффиксом «без mermaid»;
+  счётчик `chandra_retries` в `curl :8511/stats`.
+- llama.cpp warning `--image-min-tokens 1024` (grounding) — не применено:
+  bbox и так адекватные; флаг на будущее при странностях с координатами.
+- Пин кванта: mradermacher Q8_0 (5,3Г) + mmproj-Q8_0; свап mmproj-f16 —
+  `scripts/download_chandra_gguf.sh --mmproj-f16` при странностях vision.
+
+**A/B против surya** (`scripts/ab_block_ocr.py`, движок из /stats):
+surya сам повторяется на диаграммах («Система (circle)…» ×3), chandra выдаёт
+чистую структуру с переводами подписей; скорость сопоставима (30с vs 30с,
+16,5 vs 23,8с на англ. таблице). Решение о смене дефолта — после пилота на
+реальных потоках документов.
+
+Ограничение: chandra задействована **только в block-OCR** (table-fallback,
+формулы). Layout/full-page остаются на surya — контракт marker (guided-JSON)
+умеет давать только surya. Full-page Chandra (layout-HTML одним проходом,
+замена whole-pipeline) — отдельный эксперимент, гейт-скрипт готов:
+`uv run python scripts/chandra_gate_test.py --pages "файл.pdf:10-15" --workers 4`.
 
 
 ### 3.3 Режимы по типу документа
