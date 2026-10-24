@@ -9,7 +9,7 @@ OCR 2 (modelset 2, USAGE §3.7). Движок прокси берётся из /
 (block_engine: paddle|chandra|surya), каталог результата — по имени движка.
 
 Usage: python scripts/ab_block_ocr.py <image.png> [...]   (запускать при
-поднятых сервисах: modelset 1 → services.sh start --ocr-proxy --no-llm;
+поднятых сервисах: modelset 1 → services.sh start --modelset 1 --no-llm;
 modelset 2 → services.sh start --modelset 2 --no-llm)
 """
 

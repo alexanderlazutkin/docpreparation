@@ -24,7 +24,8 @@
 Эндпоинты: /health (нужные бэкенды живы), /v1/models (алиас surya),
 /v1/chat/completions, /stats (счётчики маршрутов + block_engine).
 
-Запуск: services.sh start --ocr-proxy (modelset 1) или
+Запуск: services.sh start --modelset 1 (прокси по умолчанию; раньше
+требовался флаг --ocr-proxy, теперь no-op) или
 services.sh start --modelset 2 (block-OCR -> chandra) —
 или вручную: OCR_PROXY_PORT=8511 SURYA_URL=… PADDLE_URL=… CHANDRA_URL=…
 python scripts/ocr_proxy.py.

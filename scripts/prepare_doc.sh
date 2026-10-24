@@ -34,9 +34,9 @@ case "$LANG_FLAG" in ""|ru|en) ;; *) echo "--lang: ожидается ru|en"; ex
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
 
-# Аттач к OCR-стеку (services.sh): если поднят прокси-адаптер (--ocr-proxy) —
-# цепляемся к нему (layout/table_rec→surya, block-OCR→PaddleOCR-VL); иначе к
-# постоянному surya-серверу напрямую.
+# Аттач к OCR-стеку (services.sh): если поднят прокси-адаптер (по умолчанию
+# в modelset 1/2) — цепляемся к нему (layout/table_rec→surya,
+# block-OCR→PaddleOCR-VL/Chandra); иначе к постоянному surya-серверу напрямую.
 SURYA_PORT="${SURYA_PORT:-8510}"
 OCR_PROXY_PORT="${OCR_PROXY_PORT:-8511}"
 ATTACHED_PROXY=0
@@ -240,7 +240,9 @@ fi
 # [1.5] Ремонт провальных таблиц (USAGE §2.6-Б): 2-я попытка fast/pdftext по
 # страницам из «Table OCR failed» лога marker; вставка в конец секции страницы;
 # отчёт: восстановлено/не восстановлено (страница + блок + метрики).
-if [ "${TABLE_REPAIR_DONE:-0}" = 0 ] && [ "$QC_SOFT" = 0 ] && [ -s "$ROOT/logs/${STEM}.marker.log" ]; then
+# Работает и в фрагментном режиме (индексы /page/N в логе marker —
+# документные 0-based, {N}-метки фрагмента тоже документные; 2026-10-24).
+if [ "${TABLE_REPAIR_DONE:-0}" = 0 ] && [ -s "$ROOT/logs/${STEM}.marker.log" ]; then
     RP_OUT="$(uv run --project "$ROOT" python "$ROOT/scripts/table_repair.py" --parse "$ROOT/logs/${STEM}.marker.log" || true)"
     RP_PAGES="$(printf '%s\n' "$RP_OUT" | sed -n 's/^TABLE_REPAIR_PAGES=//p' | head -1)"
     if [ -n "$RP_PAGES" ]; then
@@ -263,7 +265,6 @@ if [ "${TABLE_REPAIR_DONE:-0}" = 0 ] && [ "$QC_SOFT" = 0 ] && [ -s "$ROOT/logs/$
         IFS="$OLDIFS"
     fi
 fi
-[ "$QC_SOFT" = 1 ] && echo "[--] table repair: пропущен (фрагментный режим; полный прогон отремонтирует)"
 TABLE_REPAIR_DONE=1
 
 # язык документа: один раз на файл (нужен и captioning, и QC), логируем

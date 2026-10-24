@@ -5,7 +5,8 @@
 # Диапазон и фрагменты (для тестов и больших файлов):
 #   --pages "S[-E]"   начальная страница S (деф. 1), конечная E (деф. 0 = до конца)
 #   --fragments K     диапазон делится на K фрагментов, обрабатываемых поочерёдно
-#                     (деф. 1); каждый — свой каталог outbox/<имя>__pS-E/ и свой resume;
+#                     (деф. авто: см. ниже; 1 = без деления); каждый — свой
+#                     каталог outbox/<имя>__pS-E/ и свой resume;
 #                     при K>1 фрагменты автоматически склеиваются в один результат
 #                     (outbox/<имя>/ без --pages, иначе <имя>__pS-E/; проверки:
 #                     все части в результате, ссылки на картинки целы, мягкий QC);
@@ -14,7 +15,16 @@
 #                     склейки (и доп. отладочный функционал в будущем)
 #   --fragment-pause N  пауза (сек) между фрагментами И между файлами —
 #                     охлаждение ПК при длинных пакетных прогонах
-#                     (деф. 0 = без паузы; не после последнего фрагмента/файла)
+#                     (деф. 0, при авто-фрагментации — 90; не после
+#                     последнего фрагмента/файла)
+#   АВТО-ФРАГМЕНТАЦИЯ (2026-10-24, стандарт для больших книг): если --fragments
+#   не задан и в диапазоне > AUTO_FRAGMENT_PAGES стр. (деф. 120; 0 = откл.) —
+#   K = ceil(страниц / AUTO_FRAGMENT_SIZE) (деф. 80/фрагмент), пауза
+#   AUTO_FRAGMENT_PAUSE (деф. 90с, если пауза не задана флагом/env). Причина:
+#   marker на ПОЛНЫХ прогонах >111 стр. с block-OCR через прокси молча выдавал
+#   хвост сырым HTML (2026-10-24, USAGE §3.7-известные-проблемы); фрагменты
+#   ~80 стр. проверены (234 стр. → 3 фрагмента). Флаг/env FRAGMENTS/FRAGMENT_PAUSE
+#   перебивают авто (.env, читается этим скриптом).
 #   --retry-ocr       при QC FAIL выполнять ретрай --force_ocr (по умолчанию ВЫКЛ)
 #   --lang ru|en      язык документа: VLM-описания и гейт QC (кириллица/латиница);
 #                     без флага — авто-детект в prepare_doc (деф. ru)
@@ -29,17 +39,26 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-FORCE="" PAGES="" FRAGS=1 RETRY="" DEBUG=0 PAUSE=0 LANG_ARG="" NO_ANCHORS=""
+# .env — дефолты FRAGMENTS/FRAGMENT_PAUSE/AUTO_FRAGMENT_* (флаги сильнее)
+if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
+
+FORCE="" PAGES="" FRAGS="${FRAGMENTS:-1}" RETRY="" DEBUG=0 PAUSE="${FRAGMENT_PAUSE:-0}" LANG_ARG="" NO_ANCHORS=""
+FRAGS_GIVEN=0 PAUSE_GIVEN=0
+[ -n "${FRAGMENTS:-}" ] && FRAGS_GIVEN=1
+[ -n "${FRAGMENT_PAUSE:-}" ] && PAUSE_GIVEN=1
+AUTO_FR_PAGES="${AUTO_FRAGMENT_PAGES:-120}"   # авто-фрагментация: порог стр. (0 = выкл.)
+AUTO_FR_SIZE="${AUTO_FRAGMENT_SIZE:-80}"      # целевой размер фрагмента (стр.)
+AUTO_FR_PAUSE="${AUTO_FRAGMENT_PAUSE:-90}"    # пауза при авто (если не задана явно)
 while [ $# -gt 0 ]; do
     case "${1//_/-}" in
         --force) FORCE="--force"; shift ;;
         --pages) PAGES="${2:?--pages требует значение}"; shift 2 ;;
-        --fragments) FRAGS="${2:?--fragments требует значение}"; shift 2 ;;
+        --fragments) FRAGS="${2:?--fragments требует значение}"; FRAGS_GIVEN=1; shift 2 ;;
         --retry-ocr) RETRY="--retry-ocr"; shift ;;
         --no-page-anchors) NO_ANCHORS="--no-page-anchors"; shift ;;
         --debug) DEBUG=1; shift ;;
-        --fragment-pause) PAUSE="${2:?--fragment-pause требует значение}"; shift 2 ;;
-        --fragment-pause=*) PAUSE="${1#*=}"; shift ;;
+        --fragment-pause) PAUSE="${2:?--fragment-pause требует значение}"; PAUSE_GIVEN=1; shift 2 ;;
+        --fragment-pause=*) PAUSE="${1#*=}"; PAUSE_GIVEN=1; shift ;;
         --lang) LANG_ARG="${2:?--lang требует значение}"; shift 2 ;;
         --lang=*) LANG_ARG="${1#*=}"; shift ;;
         *) echo "неизвестный аргумент: $1"; exit 2 ;;
@@ -92,6 +111,7 @@ echo "== ETA-скорости: marker ${R_MARK} с/стр, caption ${R_CAP} с/�
 RS="выкл"; [ -n "$RETRY" ] && RS="вкл"
 DB="выкл"; [ "$DEBUG" = 1 ] && DB="вкл (фрагменты сохраняются)"
 echo "== Диапазон: ${PAGES:-весь документ}; фрагментов: ${FRAGS}; fragment-pause: ${PAUSE}с (между фрагментами и файлами); язык: ${LANG_ARG:-авто}; retry-ocr: $RS; debug: $DB =="
+echo "== Авто-фрагментация: >${AUTO_FR_PAGES} стр. → по ${AUTO_FR_SIZE} стр., пауза ${AUTO_FR_PAUSE}с (если --fragments не задан; выкл: AUTO_FRAGMENT_PAGES=0) =="
 
 ROWS=()
 k=0; fails=0
@@ -109,12 +129,23 @@ for f in "${FILES[@]}"; do
     if [ "$E" -lt "$S" ]; then echo "[--] $stem: пустой диапазон $S-$E, пропуск"; continue; fi
     n=$((E-S+1))
 
-    # деление диапазона на FRAGS фрагментов
+    # авто-фрагментация больших документов (стандарт 2026-10-24): без явного
+    # --fragments/FRAGMENTS и > AUTO_FR_PAGES стр. → K = ceil(n/AUTO_FR_SIZE),
+    # пауза AUTO_FR_PAUSE (если пауза не задана явно). Причина: raw-HTML баг
+    # marker на полных прогонах >~111 стр. (docs/HANDOFF, 2026-10-24)
+    EFF_FRAGS="$FRAGS"; EFF_PAUSE="$PAUSE"
+    if [ "$FRAGS_GIVEN" != 1 ] && [ "$AUTO_FR_PAGES" -gt 0 ] 2>/dev/null && [ "$n" -gt "$AUTO_FR_PAGES" ]; then
+        EFF_FRAGS=$(( (n + AUTO_FR_SIZE - 1) / AUTO_FR_SIZE ))
+        [ "$PAUSE_GIVEN" != 1 ] && EFF_PAUSE="$AUTO_FR_PAUSE"
+        echo "[--] $stem: авто-фрагментация — $n стр. > $AUTO_FR_PAGES → $EFF_FRAGS фрагм. (по ~$AUTO_FR_SIZE стр.), пауза ${EFF_PAUSE}с"
+    fi
+
+    # деление диапазона на EFF_FRAGS фрагментов
     FR_RANGES=()
-    if [ "$FRAGS" -le 1 ]; then
+    if [ "$EFF_FRAGS" -le 1 ]; then
         FR_RANGES+=("$S-$E")
     else
-        per=$(( (n + FRAGS - 1) / FRAGS ))
+        per=$(( (n + EFF_FRAGS - 1) / EFF_FRAGS ))
         s=$S
         while [ "$s" -le "$E" ]; do
             e=$((s+per-1)); [ "$e" -gt "$E" ] && e=$E
@@ -142,9 +173,9 @@ for f in "${FILES[@]}"; do
             ROWS+=("FAIL|$stem|$j/$K|$((SECONDS-t0))|$fn"); fails=$((fails+1))
         fi
         # пауза между фрагментами (охлаждение ПК), не после последнего
-        if [ "$PAUSE" -gt 0 ] && [ "$j" -lt "$K" ]; then
-            echo "[--] пауза ${PAUSE}с перед следующим фрагментом (fragment-pause)…"
-            sleep "$PAUSE"
+        if [ "$EFF_PAUSE" -gt 0 ] && [ "$j" -lt "$K" ]; then
+            echo "[--] пауза ${EFF_PAUSE}с перед следующим фрагментом (fragment-pause)…"
+            sleep "$EFF_PAUSE"
         fi
     done
 
@@ -186,9 +217,9 @@ for f in "${FILES[@]}"; do
 
     # пауза между файлами (охлаждение ПК), не после последнего; действует
     # независимо от фрагментации (файл без фрагментов — та же пауза)
-    if [ "$PAUSE" -gt 0 ] && [ "$k" -lt "$N" ]; then
-        echo "[--] пауза ${PAUSE}с перед следующим файлом (fragment-pause)…"
-        sleep "$PAUSE"
+    if [ "$EFF_PAUSE" -gt 0 ] && [ "$k" -lt "$N" ]; then
+        echo "[--] пауза ${EFF_PAUSE}с перед следующим файлом (fragment-pause)…"
+        sleep "$EFF_PAUSE"
     fi
 done
 

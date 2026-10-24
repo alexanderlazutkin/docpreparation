@@ -13,7 +13,7 @@
 # (делает caption_figures.py --redescribe). Прогон прерываем/перезапускаем:
 # уже переописанные книги просто пройдут заново (идемпотентно).
 #
-# Требует поднятых сервисов: ./services.sh start --ocr-proxy (Qwen :8080
+# Требует поднятых сервисов: ./services.sh start (Qwen :8080
 # для VLM-описаний; surya/прокси для этого скрипта не нужны).
 #
 # Usage: scripts/redescribe_all.sh [--pause N] [--lang en|ru] [подстрока-фильтр]
@@ -51,7 +51,7 @@ case "$LANG_ARG" in en|ru) ;; *) echo "--lang: ожидается en|ru"; exit 2
 # LLM-сервис должен отвечать (VLM-описания): иначе честный отказ
 LLM_URL="http://127.0.0.1:${LLM_PORT:-8080}"
 if ! curl -sf -m 2 "$LLM_URL/v1/models" >/dev/null 2>&1; then
-    echo "[FAIL] LLM-сервис не поднят ($LLM_URL) — сначала: ./services.sh start --ocr-proxy" >&2
+    echo "[FAIL] LLM-сервис не поднят ($LLM_URL) — сначала: ./services.sh start" >&2
     exit 2
 fi
 

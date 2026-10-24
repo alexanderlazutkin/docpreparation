@@ -10,23 +10,25 @@
 #      32.7 ГБ; склейка кросс-страничных таблиц, постправка, чтение схем).
 #
 # Usage:
-#   ./services.sh start [--modelset N] [опции]   # N=1 (деф.): surya+LLM,
-#                                       # [--ocr-proxy] добавляет Paddle+прокси;
+#   ./services.sh start [--modelset N] [опции]   # N=1 (деф.): surya+Paddle+
+#                                       # прокси+LLM (прокси — по умолчанию;
+#                                       # --no-ocr-proxy отключает Paddle+прокси);
 #                                       # N=2: surya+Chandra (:8513)+прокси
 #                                       # (block-OCR->chandra) +LLM; paddle
-#                                       # не поднимается, --ocr-proxy не нужен
+#                                       # не поднимается
 #   ./services.sh start [--no-llm] [--llm-model PATH] [--llm-parallel N]   # N деф. 2
 #                                       # surya (+ LLM, если не --no-llm);
 #                                       # --llm-parallel — слоты LLM-сервера
-#   ./services.sh start [--ocr-proxy]   # modelset 1: + PaddleOCR-VL (:8512)
-#                                       # и прокси-адаптер (:8511,
-#                                       # scripts/ocr_proxy.py): marker аттачится
-#                                       # к прокси; все пути идут на surya
-#                                       # (прозрачный pass-through), Paddle поднят
-#                                       # рядом; block-OCR на Paddle — только
-#                                       # через OCR_PROXY_BLOCK_ENGINE=paddle
-#                                       # (эксперимент, §3.6-4; флаг не указан —
-#                                       # адаптер не поднимается)
+#   ./services.sh start [--no-ocr-proxy]  # modelset 1 без Paddle (:8512) и
+#                                       # прокси (:8511, scripts/ocr_proxy.py):
+#                                       # marker напрямую к surya. С прокси
+#                                       # (деф.): marker аттачится к прокси,
+#                                       # все пути на surya (pass-through),
+#                                       # Paddle поднят рядом; block-OCR на
+#                                       # Paddle — только через
+#                                       # OCR_PROXY_BLOCK_ENGINE=paddle
+#                                       # (эксперимент, §3.6-4); --ocr-proxy —
+#                                       # no-op (совместимость)
 #   ./services.sh start [--surya-model PATH] [--surya-mmproj PATH]
 #                       [--surya-parallel N]          # подмена OCR-VLM за алиасом
 #                                       # datalab-to/surya-ocr-2 (тест GLM-OCR,
@@ -37,8 +39,8 @@
 #   ./services.sh check [--deep]                         # статус; --deep = проба генерации
 #
 # Наборы моделей (MODELSET):
-#   1 (деф.) — surya-2 :8510 (layout/OCR) + [--ocr-proxy: Paddle :8512, прокси
-#              :8511 pass-through] + Qwen3.6-35B-A3B :8080 (--use_llm, captioning)
+#   1 (деф.) — surya-2 :8510 + Paddle :8512 + прокси :8511 pass-through (деф.,
+#              --no-ocr-proxy отключает) + Qwen3.6-35B-A3B :8080 (--use_llm)
 #   2        — surya-2 :8510 (layout/table для marker) + Chandra OCR 2 :8513
 #              (block-OCR за прокси :8511, layout-HTML с таблицами/alt) +
 #              Qwen3.6-35B-A3B :8080. Гейты Chandra: USAGE §3.7 (кириллица
@@ -56,7 +58,7 @@
 #   PADDLE_PORT=8512  PADDLE_PARALLEL=8  PADDLE_CTX=parallel×8192
 #   CHANDRA_MODEL / CHANDRA_MMPROJ (деф. /media/llm/Models/OCR/chandra-ocr-2-gguf/…)
 #   CHANDRA_PORT=8513  CHANDRA_PARALLEL=4  CHANDRA_CTX=parallel×8192
-#   OCR_PROXY_PORT=8511 (scripts/ocr_proxy.py, --ocr-proxy / modelset 2)
+#   OCR_PROXY_PORT=8511 (scripts/ocr_proxy.py; modelset 1 — деф., 2 — всегда)
 #   LLM_MODEL (деф. /media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf)
 #   LLM_MMPROJ (деф. mmproj-F32.gguf рядом с моделью; пусто = текст-only сервис)
 #   LLM_PORT=8080  LLM_CTX=32768  LLM_PARALLEL=2 (35B: 2 слота × 16k)
@@ -332,7 +334,7 @@ check() {
     else ok "запущен внешне (этот скрипт его не остановит)"; fi
     ok "модель: $mid"
   else
-    inf "не запущен (нужен только для --ocr-proxy; ./services.sh start --ocr-proxy)"
+    inf "не запущен (поднимается по умолчанию в modelset 1; ./services.sh start [--modelset 1])"
   fi
 
   echo "== Chandra OCR 2 (:$CHANDRA_PORT) — block-OCR через прокси (modelset 2) =="
@@ -355,7 +357,7 @@ except Exception: print("?")' 2>/dev/null || echo '?')"
     ok "маршрут: layout/table_rec→surya :$SURYA_PORT, block-OCR→$pengine"
     inf "prepare_doc.sh аттачится сюда автоматически; статистика: curl :$OCR_PROXY_PORT/stats"
   else
-    inf "не запущен (./services.sh start --ocr-proxy | --modelset 2)"
+    inf "не запущен (./services.sh start [--modelset 1 | --modelset 2])"
   fi
 
   echo "== LLM для --use_llm (:$LLM_PORT) =="
@@ -384,14 +386,15 @@ except Exception: print("?")' 2>/dev/null || echo '?')"
 # ------------------------------------------------------------------ main ----
 
 CMD="help"; [ $# -gt 0 ] && CMD="$1"; shift || true
-DEEP=0 NO_LLM=0 OCR_PROXY=0 PARALLEL_GIVEN=0 MODEL_GIVEN=0 MODELSET_GIVEN=0
+DEEP=0 NO_LLM=0 OCR_PROXY=0 OCR_PROXY_GIVEN=0 OCR_PROXY_OFF=0 PARALLEL_GIVEN=0 MODEL_GIVEN=0 MODELSET_GIVEN=0
 S_PARALLEL_GIVEN=0 S_MODEL_GIVEN=0 S_MMPROJ_GIVEN=0
 MODELSET="${MODELSET:-1}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --deep) DEEP=1; shift ;;
     --no-llm) NO_LLM=1; shift ;;
-    --ocr-proxy) OCR_PROXY=1; shift ;;
+    --ocr-proxy) OCR_PROXY_GIVEN=1; shift ;;
+    --no-ocr-proxy) OCR_PROXY_OFF=1; shift ;;
     --modelset) MODELSET="${2:?--modelset требует значение}"; MODELSET_GIVEN=1; shift 2 ;;
     --modelset=*) MODELSET="${1#*=}"; MODELSET_GIVEN=1; shift ;;
     --llm-model) LLM_MODEL="${2:?--llm-model требует значение}"; MODEL_GIVEN=1; shift 2 ;;
@@ -409,12 +412,24 @@ while [ $# -gt 0 ]; do
 done
 [ "${LLM_PARALLEL:-2}" -ge 1 ] 2>/dev/null || die "--llm-parallel: ожидается целое >= 1"
 [ "${SURYA_PARALLEL:-8}" -ge 1 ] 2>/dev/null || die "--surya-parallel: ожидается целое >= 1"
+if [ "$OCR_PROXY_GIVEN" = 1 ] && [ "$OCR_PROXY_OFF" = 1 ]; then
+  die "--ocr-proxy и --no-ocr-proxy взаимоисключаемы"
+fi
 case "$MODELSET" in
-  1) ;;
-  2) if [ "$OCR_PROXY" = 1 ]; then
-       warn "--ocr-proxy игнорируется в modelset 2 (прокси поднимается сам, paddle не нужен)"
+  1) if [ "$OCR_PROXY_OFF" = 1 ]; then
        OCR_PROXY=0
+       inf "OCR-прокси отключен (--no-ocr-proxy): marker напрямую к surya"
+     else
+       OCR_PROXY=1
+       [ "$OCR_PROXY_GIVEN" = 1 ] && inf "--ocr-proxy: флаг не нужен — прокси поднимается по умолчанию в modelset 1"
      fi ;;
+  2) if [ "$OCR_PROXY_GIVEN" = 1 ]; then
+       warn "--ocr-proxy игнорируется в modelset 2 (прокси поднимается сам, paddle не нужен)"
+     fi
+     if [ "$OCR_PROXY_OFF" = 1 ]; then
+       warn "--no-ocr-proxy игнорируется в modelset 2 (прокси нужен для block-OCR→chandra)"
+     fi
+     OCR_PROXY=0 ;;
   *) die "--modelset: ожидается 1 (surya+paddle+LLM) или 2 (surya+chandra+LLM), получено '$MODELSET'" ;;
 esac
 [ "$S_PARALLEL_GIVEN" = 1 ] && SURYA_CTX="$((SURYA_PARALLEL * 12288))"  # пересчёт под слоты
@@ -452,7 +467,7 @@ case "$CMD" in
     SM=""; [ "$S_MODEL_GIVEN" = 1 ] && SM="--surya-model $SURYA_MODEL"
     SP=""; [ "$S_MMPROJ_GIVEN" = 1 ] && SP="--surya-mmproj $SURYA_MMPROJ"
     SL=""; [ "$S_PARALLEL_GIVEN" = 1 ] && SL="--surya-parallel $SURYA_PARALLEL"
-    OP=""; [ "$OCR_PROXY" = 1 ] && OP="--ocr-proxy"
+    OP=""; [ "$OCR_PROXY_OFF" = 1 ] && OP="--no-ocr-proxy"
     MS=""; [ "$MODELSET_GIVEN" = 1 ] && MS="--modelset $MODELSET"
     "$0" stop $NL
     "$0" start $NL $LM $LP $SM $SP $SL $OP $MS
