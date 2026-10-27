@@ -9,20 +9,20 @@ Root cause (расследование 2026-10-27, сессия rawhtml_ab):
 2. bs4 >=4.13 (здесь 4.15.0) парсит html.parser с convert_charrefs=False
    (bs4/builder/_htmlparser.py:413).
 3. CPython html.parser: инвалидный `&#` в stop-позиции (сразу после тега)
-   заставляет goahead() выйти из цикла («wait for more data»). Первое
-   вхождение ломает feed() (безвредно — close() доюирает), ВТОРОЕ ломает
-   close(): при end=1 остаток документа сбрасывается одним текстовым узлом
-   (html/parser.py, финальный flush rawdata[i:n]) → markdownify выводит его
-   как есть → хвост документа = сырой HTML, QC слеп.
+   прерывает goahead() («wait for more data»). Первое вхождение ломает
+   feed() (close() доюирает), ВТОРОЕ ломает close(): при end=1 остаток
+   документа сбрасывается одним текстовым узлом (html/parser.py, финальный
+   flush rawdata[i:n]) → markdownify выводит его как есть → хвост
+   документа = сырой HTML, QC слеп.
 
-   Поэтому баг выглядит «кумулятивным» и проявляется только когда в документе
-   >= 2 tag-смежных инвалидных `&#` (в книге Chmura/Heumann — стр. 25 и 110,
-   слом с стр. 111; окно 101–131 чистое — там только одно вхождение).
+   Поэтому баг выглядит «кумулятивным»: проявляется при >= 2 tag-смежных
+   инвалидных `&#` (в книге Chmura/Heumann — стр. 25 и 110, слом с стр. 111;
+   окно 101–131 чистое — там одно вхождение).
 
 Fix: эскейпим инвалидные `&#` → `&amp;#` в full_html (extract_html, level==0)
-перед любой дальнейшей парсинг-конвертацией. Семантика не меняется: это и
-был литеральный текст. Валидные charref'ы (`&#x27;`, `&#65;`) не трогаем —
-регекс зеркалит charref из html.parser.
+перед конвертацией. Семантика не меняется: это и был литеральный текст.
+Валидные charref'ы (`&#x27;`, `&#65;`) не трогаем — регекс зеркалит charref
+из html.parser.
 
 Патч идемпотентен и живёт в .venv до переустановки marker (uv sync при
 смене lock). prepare_doc.sh вызывает патчер перед каждым запуском marker;
@@ -30,30 +30,32 @@ QC-гейт (qc_check.py, «сырой HTML») ловит регрессию, е
 
 Использование:
   python scripts/patch_marker.py            # применить (идемпотентно)
-  python scripts/patch_marker.py --check    # exit 0 = применён, 1 = нет
-  python scripts/patch_marker.py --selftest # репро бага до/после патча
+  python scripts/patch_marker.py --check    # exit 0 = применён и жив, 1 = нет
+  python scripts/patch_marker.py --selftest # репро бага + проверка патча
 """
 
 import importlib.util
 import sys
-import subprocess
 
-PATCH_MARK = "# docpreparation vendor patch (raw-HTML tail bug)"
+PATCH_MARK = "# docpreparation vendor patch (raw-HTML tail bug, v2)"
 
-FUNC_BLOCK = """
-# docpreparation vendor patch (raw-HTML tail bug): bare `&#` from VLM output
-# makes html.parser bail out of goahead() (bs4>=4.13: convert_charrefs=False);
-# a 2nd occurrence during close() flushes the rest of the document as a single
-# text node. Escape invalid charrefs to literal text; valid ones untouched.
+# Вставляется на уровне МОДУЛЯ, ПЕРЕД class HTMLRenderer (v1 вставляла без
+# отступа перед методом класса — класс терял extract_html и всё следом).
+FUNC_BLOCK = """# docpreparation vendor patch (raw-HTML tail bug, v2): bare `&#` from VLM
+# output makes html.parser bail out of goahead() (bs4>=4.13:
+# convert_charrefs=False); a 2nd occurrence during close() flushes the rest
+# of the document as a single text node. Escape invalid charrefs to literal
+# text; valid ones untouched (regex mirrors html.parser's charref).
 _INVALID_CHARREF_RE = re.compile(r"&#(?!(?:[0-9]+|[xX][0-9a-fA-F]+)[^0-9a-fA-F])")
 
 
 def sanitize_charrefs(html_text: str) -> str:
     return _INVALID_CHARREF_RE.sub("&amp;#", html_text)
 
+
 """
 
-ANCHOR_DEF = "    def extract_html(self, document, document_output, level=0):"
+ANCHOR_CLASS = "class HTMLRenderer(BaseRenderer):"
 ANCHOR_RET = '''""")
 
         return output, images'''
@@ -63,7 +65,7 @@ PATCHED_RET = '''""")
         return output, images'''
 
 
-def marker_html_path():
+def html_path():
     spec = importlib.util.find_spec("marker.renderers.html")
     if spec is None or not spec.origin:
         sys.exit(
@@ -77,43 +79,80 @@ def read(p):
         return f.read()
 
 
-def is_patched(src):
-    return PATCH_MARK in src
+def write(p, s):
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(s)
+
+
+def verify_live():
+    """Патч применён И класс живой. Проверка в чистом subprocess —
+    in-process импорт закэшируется в sys.modules и не увидит файл на диске."""
+    import subprocess
+    code = (
+        "import marker.renderers.html as h\n"
+        "from marker.renderers.markdown import MarkdownRenderer\n"
+        "assert hasattr(h, 'sanitize_charrefs')\n"
+        "assert hasattr(h.HTMLRenderer, 'extract_html')\n"
+        "assert hasattr(MarkdownRenderer, 'extract_html')\n"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code], capture_output=True
+    ).returncode == 0
 
 
 def apply():
-    p = marker_html_path()
+    p = html_path()
     src = read(p)
-    if is_patched(src):
-        print(f"[--] патч уже применён: {p}")
+
+    if verify_live():
+        print(f"[--] патч уже применён и жив: {p}")
         return
-    if ANCHOR_DEF not in src or ANCHOR_RET not in src:
+
+    # сломанный/устаревший патч (v1) -> восстановить оригинал
+    backup = p + ".vendor-orig"
+    if PATCH_MARK not in src and "vendor patch" in src:
+        print("[--] найден битый/старый патч — восстанавливаю из .vendor-orig")
+        try:
+            src = read(backup)
+            write(p, src)
+        except FileNotFoundError:
+            sys.exit(
+                "FAIL: битый патч, а .vendor-orig нет — переустанови marker (uv sync)"
+            )
+
+    if ANCHOR_CLASS not in src or ANCHOR_RET not in src:
         sys.exit(
             "FAIL: якоря патча не найдены — marker-pdf изменился "
             "(версия?), патч нужно переписать. Файл: " + p
         )
-    backup = p + ".vendor-orig"
     try:
         read(backup)
     except FileNotFoundError:
-        with open(backup, "w", encoding="utf-8") as f:
-            f.write(src)
-    src = src.replace(ANCHOR_DEF, FUNC_BLOCK + ANCHOR_DEF, 1)
+        write(backup, src)
+
+    src = src.replace(ANCHOR_CLASS, FUNC_BLOCK + ANCHOR_CLASS, 1)
     src = src.replace(ANCHOR_RET, PATCHED_RET, 1)
-    with open(p, "w", encoding="utf-8") as f:
-        f.write(src)
-    print(f"[OK] патч применён: {p} (бэкап: {backup})")
+    write(p, src)
+
+    if not verify_live():
+        # откатиться, чтобы не оставить сломанный импорт
+        write(p, read(backup))
+        sys.exit("FAIL: патч применился, но верификация импорта не прошла — откатил")
+
+    print(f"[OK] патч применён и верифицирован: {p} (бэкап: {backup})")
 
 
 def check():
-    p = marker_html_path()
-    ok = is_patched(read(p))
-    print(("[OK] патч на месте: " if ok else "[--] патч ОТСУТСТВУЕТ: ") + p)
+    p = html_path()
+    ok = verify_live()
+    print(
+        ("[OK] патч на месте и жив: " if ok else "[--] патч ОТСУТСТВУЕТ/СЛОМАН: ") + p
+    )
     sys.exit(0 if ok else 1)
 
 
 def selftest():
-    """Репро бага (до патча — на сыром HTML, после — через sanitize)."""
+    """Репро бага + проверка санитайзера и живости класса."""
     from bs4 import BeautifulSoup
 
     poison = (
@@ -154,7 +193,10 @@ def selftest():
         if "data-page-id" in str(s)
     ]
     assert not clean, "после sanitize хвост всё ещё течёт"
-    print("[OK] после патча: дерево парсится целиком, утечки нет")
+    print("[OK] после санитайза: дерево парсится целиком, утечки нет")
+
+    assert verify_live(), "класс сломан: extract_html отсутствует"
+    print("[OK] класс жив: HTMLRenderer/MarkdownRenderer.extract_html на месте")
     print("SELFTEST PASS")
 
 

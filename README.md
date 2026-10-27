@@ -1,8 +1,10 @@
 # docpreparation — преп-пайплайн PDF → Markdown для базы знаний
 
-Локальный конвейер подготовки документов: PDF → готовый `.md` (текст, таблицы,
-VLM-описания графики, метки страниц) с QC-гейтом качества. Целевые потребители —
-БЗ/RAG Cherry Studio и Obsidian. Всё считается на локальном железе
+Локальный конвейер подготовки документов: **PDF → готовый `.md`** (текст,
+таблицы, VLM-описания графики, метки страниц) с QC-гейтом качества.
+Целевые потребители — **любой UI с локальной базой знаний** (Open WebUI,
+AnythingLLM, Khoj…) и Obsidian: пайплайн от UI не зависит, на выходе —
+готовый к индексации Markdown. Всё считается на локальном железе
 (Strix Halo / Radeon 8060S, llama.cpp/Vulkan), без облака.
 
 > Главный справочник по возможностям, примерам, замерам и реестру требований —
@@ -10,66 +12,93 @@ VLM-описания графики, метки страниц) с QC-гейто
 
 ## Зачем
 
-Встроенный конвертер Cherry Studio тихо теряет текст на русскоязычных PDF:
-шрифты без ToUnicode дают 0% кириллицы в индексе при «успешной» загрузке,
+Встроенные конвертеры UI с базами знаний тихо теряют текст на русскоязычных
+PDF: шрифты без ToUnicode дают 0% кириллицы в индексе при «успешной» загрузке,
 таблицы склеиваются в мусор, оглавления с точечными лидерами попадают в чанки,
-нет layout-анализа и привязки к страницам. Вывод (аудит двух БЗ, детально —
-[docs/COMPARISON.md](docs/COMPARISON.md)): **PDF не должен быть рабочим форматом
-входа в БЗ** — конвертация делается заранее, вне CS, с контролем качества.
-Готовый `.md` индексируется чисто (детальный разбор — USAGE).
+нет layout-анализа и привязки к страницам (аудит двух БЗ —
+[docs/COMPARISON.md](docs/COMPARISON.md)).
+
+Вывод: **PDF не должен быть рабочим форматом входа в БЗ** — конвертация
+делается заранее, вне UI, с контролем качества. Готовый `.md` индексируется
+чисто.
+
+## Возможности
+
+- **Конвертация с сохранением контента** — marker + surya-2: layout, таблицы
+  (текст-слой → table-OCR → фолбэк), полнотраничный OCR сканов и битых шрифтов.
+- **QC-гейт** (`qc_check.py`) — доля целевого алфавита ≥55% среди букв,
+  TOC-лидеры, переносы, таблицы, сырой HTML; язык ru/en: флаг > env > авто-детект.
+  «Мусорный, но непустой» текст = FAIL, а не успех.
+- **VLM-описания фигур** (`caption_figures.py`) — локальная 35B быстрее облака
+  (5,4 с/фигура); структурный режим: Mermaid-диаграммы (валидация mmdc),
+  таблицы значений, связи сущностей — графика становится находимой в RAG.
+- **Метки страниц** `⌗p.N` — привязка «чанк БЗ → страница исходника»: метка
+  переживает чанкинг, грепается (`grep -n '⌗p\.42' *.md`).
+- **Авто-ремонт таблиц** (`table_repair.py`) — «Table OCR failed» в логе marker →
+  fast-ретрай страницы → вставка в конец секции; сложные случаи — VLM-реконструкция.
+- **Фрагментация + автосклейка** (`--fragments K`, `merge_fragments.py`) —
+  огромные книги кусками; resume с места обрыва, посимвольная проверка
+  вхождения частей, объединение `_meta.json`.
+- **Гибридный OCR-стек** (`ocr_proxy.py`) — OpenAI-совместимый прокси за алиасом
+  surya: layout/table-rec = surya, block-OCR = выбранный движок (modelset);
+  A/B-сравнение движков (`ab_block_ocr.py`).
+- **Batch-обвязка** (`launch_batch.sh` / `prepare_all.sh`) — авто-диспетчер по
+  типу inbox, resume (`.qc_pass`), ETA по медиане таймингов, факт-скорость по
+  `/stats` прокси, сводная таблица PASS/FAIL, паузы на охлаждение.
+- **Вэб-путь** (`prepare_web.sh`) — MD из Obsidian Web Clipper → тот же
+  captioning + cleanup + QC.
 
 ## Архитектура
 
+```mermaid
+flowchart TD
+    PDF["inbox/*.pdf"] --> S1
+
+    subgraph pipeline["Пайплайн — prepare_doc.sh"]
+        direction TB
+        S1["[1/6] marker (balanced)<br/>layout + текст-слой + OCR"] --> S15
+        S15["[1.5] авто-ремонт таблиц"] --> S2
+        S2["[2/6] VLM-описания фигур<br/>prose / структур. (Mermaid)"] --> S3
+        S3["[3/6] cleanup — TOC-лидеры,<br/>{N}----- → метки ⌗p.N"] --> S4
+        S4{"[4/6] QC-гейт"} -->|PASS| S6["[6/6] готово — маркер .qc_pass"]
+        S4 -->|FAIL + --retry-ocr| S5["[5/6] force_ocr ретрай"] --> S1
+    end
+
+    subgraph services["GPU-сервисы — services.sh (llama.cpp/Vulkan)"]
+        direction TB
+        SURYA["surya-2 :8510<br/>layout · table-rec · full-page OCR"]
+        PROXY["OCR-прокси :8511<br/>маршрутизация запросов marker"]
+        BLOCK["block-OCR за прокси<br/>modelset 1: surya (+ Paddle :8512)<br/>modelset 2: Chandra :8513"]
+        LLM["Qwen3.6-35B :8080<br/>captioning · --use_llm"]
+    end
+
+    S1 -. "SURYA_INFERENCE_URL" .-> PROXY
+    PROXY -.-> SURYA
+    PROXY -.-> BLOCK
+    S2 -.-> LLM
+
+    S6 --> OUT["outbox/&lt;имя&gt;/&lt;имя&gt;.md + фигуры + _meta.json<br/>→ БЗ любого UI (Open WebUI, AnythingLLM, Khoj…) · Obsidian"]
 ```
-inbox/*.pdf ──► [1/6] marker (balanced) ──► [1.5] авто-ремонт таблиц
-                    │  layout/OCR: surya-2 (GGUF, llama.cpp/Vulkan :8510)
-                    │  опц. гибрид: OCR-прокси :8511 (block-OCR → PaddleOCR-VL :8512)
-                    ▼
-                [2/6] captioning фигур — VLM Qwen3.6-35B-A3B (:8080)
-                    │  prose / структур. режим (Mermaid+таблицы+связи)
-                    ▼
-                [3/6] cleanup — TOC-лидеры, {N}----- → метки страниц ⌗p.N
-                    ▼
-                [4/6] QC-гейт (кириллица/латиница ≥55%, лидеры, переносы, таблицы)
-                    ▼
-                [5/6] ретрай force_ocr (только --retry-ocr) ──► [6/6] готово
- outbox/<имя>/<имя>.md + фигуры + _meta.json          (.qc_pass = resume-маркер)
-```
 
-- Пакетная обвязка: `launch_batch.sh` (видимое окно терминала для пользователя)
-  → `prepare_all.sh` (resume, ETA по `logs/timings.jsonl`, фрагменты, склейка).
-- Обратный канал качества: метки страниц `⌗p.N` — из ответа БЗ открыть исходную
-  страницу PDF; авто-ремонт опирается на них как на границы секций.
-- Вэб-страницы: Obsidian Web Clipper → `inbox/*.md` → `prepare_web.sh`
-  (captioning + QC, без marker).
-
-## Возможности — какую задачу решает каждая
-
-| #   | Возможность                                                                                                                                                                                           | Решаемая задача                                                                                |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 1   | **Конвертация с сохранением контента** — marker + surya-2: layout, таблицы (текст-слой → table-OCR → фолбэк), полнотраничный OCR сканов и битых шрифтов                                               | тихая потеря текста в CS; битые шрифты без ToUnicode; сканы                                    |
-| 2   | **QC-гейт** (`qc_check.py`) — доля целевого алфавита ≥55% среди букв, TOC-лидеры, переносы, таблицы; язык ru/en: флаг > env > авто-детект                                                             | «мусорный, но непустой» текст проходит в CS как успех — здесь это FAIL                         |
-| 3   | **VLM-описания фигур** (`caption_figures.py`) — локальная 35B быстрее облака; структур. режим: Mermaid-диаграммы (валидация mmdc), таблицы значений, «Связи:»                                         | графика в RAG ненайдома — описание текстом делает её искомой; диаграммы воспроизводятся схемой |
-| 4   | **Метки страниц PDF** `⌗p.N` (деф. ВКЛ, `--no-page-anchors`)                                                                                                                                          | привязка «чанк БЗ → страница исходника»: метка переживает чанкинг, грепается                   |
-| 5   | **Авто-ремонт таблиц** (`table_repair.py`) — «Table OCR failed» в логе → fast-ретрай страницы → вставка в конец секции страницы; + VLM-реконструкция сложных случаев                                  | потерянные таблицы восстанавливаются автоматически, вставка точная (по секциям страниц)        |
-| 6   | **Фрагментация + автосклейка** (`--fragments K`, `merge_fragments.py`) — большие файлы кусками; посимвольная проверка вхождения частей, ссылки фигур, объединение `_meta.json`, мягкий QC             | огромные книги (400+ стр.) на потребительском ПК; перегрев; resume с места обрыва              |
-| 7   | **Гибридный OCR-стек** (`ocr_proxy.py`, деф. в modelset 1) — OpenAI-совместимый прокси за алиасом surya: layout/table_rec = surya, block-OCR = PaddleOCR-VL (3–5× быстрее, устойчивее на repetition-loop) | скорость block-OCR без потери качества; A/B-сравнение движков (`ab_block_ocr.py`)              |
-| 8   | **Batch-обвязка** — `launch_batch.sh`/`prepare_all.sh`: resume (`.qc_pass`), ETA по медиане таймингов, факт-скорость по `/stats` прокси, сводная таблица PASS/FAIL, `--fragment-pause` (охлаждение)   | пакетная обработка без присмотра, мониторинг агентом по `logs/`                                |
-| 9   | **Вэб-путь** (`prepare_web.sh`) — MD из Obsidian Web Clipper → captioning + cleanup + QC                                                                                                              | одинаковая гарантия качества для вэб-клипов                                                    |
+Стадии пайплайна последовательны (`[1]–[6]`); GPU-сервисы вызываются стадиями
+`[1]` (через прокси) и `[2]` (напрямую). Обратный канал качества: метки `⌗p.N` —
+из ответа БЗ открыть исходную страницу PDF; авто-ремонт опирается на них как на
+границы секций.
 
 ## Быстрый старт
 
 ```bash
 cp .env.example .env          # пути к GGUF-моделям (+ опц. облако captioning)
 uv sync                       # .venv (marker-pdf), глобальный Python не трогается
-./services.sh start               # modelset 1 (деф.): surya :8510 + Paddle :8512
-                                  # + прокси :8511 + Qwen :8080 (прокси — по умолчанию)
-./services.sh start --modelset 2  # modelset 2: surya + Chandra :8513 + прокси + Qwen
+./services.sh start           # modelset 1 (деф.): surya :8510 + Paddle :8512
+                              # + прокси :8511 + Qwen :8080 (прокси — по умолчанию)
+./services.sh start --modelset 2   # modelset 2: surya + Chandra :8513 + прокси + Qwen
 
 cp файл(ы).pdf inbox/
 scripts/launch_batch.sh       # пакет: видимое окно, логи logs/batch_latest.*
 ./services.sh stop
-# результат: outbox/<имя>/<имя>.md — грузить в БЗ через UI Cherry Studio
+# результат: outbox/<имя>/<имя>.md — готов к загрузке в БЗ
+# (UI с локальной базой знаний: Open WebUI, AnythingLLM, Khoj…)
 ```
 
 Примеры вызовов (полный набор — USAGE §2.0–2.2):
@@ -85,41 +114,42 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 
 ## Компоненты
 
-| Компонент                                                           | Роль                                                                                                                       |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| [marker-pdf](https://github.com/datalab-to/marker) 2.x (Apache-2.0) | ядро конвертации: layout, таблицы, пагинация (`paginate_output` → `⌗p`)                                                    |
-| [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M)   | OCR/layout VLM; локально: `/media/llm/Models/OCR/surya-ocr-2-gguf`                                                         |
-| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan)         | inference-серверы: surya `:8510`, Paddle `:8512`, Chandra `:8513`, Qwen `:8080`                                            |
-| Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32)                               | captioning/VLM-описания; p=2 (5,4 с/фигура)                                                                                |
-| PaddleOCR-VL-1.6 (GGUF)                                             | block-OCR за прокси (деф. выключен: `OCR_PROXY_BLOCK_ENGINE=surya`)                                                        |
-| [Chandra OCR 2](https://github.com/datalab-to/chandra) (GGUF Q8_0)  | block-OCR за прокси, modelset 2: layout-HTML с таблицами/Mermaid/alt; локально: `/media/llm/Models/OCR/chandra-ocr-2-gguf` |
-| poppler (`pdfinfo`, `pdftoppm`, `pdftotext`)                        | метаданные, рендеры, текст-слой                                                                                            |
-| node + mmdc (Mermaid CLI)                                           | валидация Mermaid в структур. режиме captioning                                                                            |
-| uv                                                                  | изолированное окружение проекта (`.venv`, `uv.lock`)                                                                       |
-| opencode + skill `.opencode/skills/docprep/`                        | агент ведёт пайплайн (версионируется в репо)                                                                               |
+| Компонент | Роль |
+| --- | --- |
+| [marker-pdf](https://github.com/datalab-to/marker) 2.x (Apache-2.0) | ядро конвертации: layout, таблицы, пагинация (`paginate_output` → `⌗p`) |
+| [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M) | OCR/layout VLM; локально: `/media/llm/Models/OCR/surya-ocr-2-gguf` |
+| [Chandra OCR 2](https://github.com/datalab-to/chandra) (GGUF Q8_0) | block-OCR за прокси (modelset 2): layout-HTML с таблицами/Mermaid/alt |
+| PaddleOCR-VL-1.6 (GGUF) | block-OCR за прокси (modelset 1; `OCR_PROXY_BLOCK_ENGINE=paddle`) |
+| Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32) | captioning/VLM-описания; p=2 (5,4 с/фигура) |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan) | inference-серверы: surya `:8510`, Paddle `:8512`, Chandra `:8513`, Qwen `:8080` |
+| poppler (`pdfinfo`, `pdftoppm`, `pdftotext`) | метаданные, рендеры, текст-слой |
+| node + mmdc (Mermaid CLI) | валидация Mermaid в структур. режиме captioning |
+| uv | изолированное окружение проекта (`.venv`, `uv.lock`) |
+| opencode + skill `.opencode/skills/docprep/` | агент ведёт пайплайн (версионируется в репо) |
 
-Наборы запуска (`services.sh --modelset N`, деф. 1; подробности — USAGE §2.1):
+### Наборы моделей (`services.sh --modelset N`, деф. 1; детали — USAGE §2.1, §3.7)
 
 | modelset | Состав | Когда |
 | --- | --- | --- |
-| 1 | surya + Paddle + прокси-pass-through (деф.) + Qwen | деф.; проверенный стек (`--no-ocr-proxy` — отключить прокси) |
-| 2 | surya (layout/table) + Chandra `:8513` (block-OCR за прокси) + Qwen | эксперименты block-OCR Chandra (гейты — USAGE §3.7) |
+| **1** | surya + Paddle + прокси-pass-through + Qwen | деф.; проверенный стек (`--no-ocr-proxy` — отключить прокси) |
+| **2** | surya (layout/table) + Chandra `:8513` (block-OCR) + Qwen | block-OCR Chandra: пилот качества закрыт положительно (IDEF1X, сложные таблицы), ~1,3× медленнее |
 
-## Особенности железа и ограничения
+## Железо и ограничения
 
 - Strix Halo (gfx1151): **vLLM/ROCm неприменимы** — GPU-инференс только через
   llama.cpp/Vulkan. Системный ROCm не нужен.
 - marker умеет спавнить свой llama-server на случайном порту, если `:8510` занят/
   недоступен (сирота ест VRAM) — поднимай сервисы через `services.sh` до запуска.
-- Границы Cherry Studio: открытых API добавления материалов нет — финальная
-  загрузка `.md` в БЗ через UI; повторно проверить реальными поисковыми запросами.
-- Смена набора сервисов (`--modelset`, `--no-ocr-proxy`, `--surya-*`) — только через явный
-  `./services.sh stop` → `start` (restart с `--no-llm` не трогает surya).
+- Загрузка готового `.md` в БЗ — вручную через UI выбранного приложения
+  (открытого API добавления материалов у большинства нет); после загрузки
+  проверить реальными поисковыми запросами.
+- Смена набора сервисов (`--modelset`, `--no-ocr-proxy`, `--surya-*`) — только
+  через явный `./services.sh stop` → `start` (restart с `--no-llm` не трогает surya).
 
-## Документы
+## Документация
 
 | Документ | Что внутри |
 |---|---|
 | [docs/USAGE.md](docs/USAGE.md) | главный справочник: сценарии, все флаги, замеры, реестр требований |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | статус, открытые вопросы, следующие шаги, грабли |
-| [docs/COMPARISON.md](docs/COMPARISON.md) | обзор OCR-моделей для Strix Halo (вкл. наши тесты GLM-OCR/PaddleOCR-VL) + сравнение с Docling/DeepDoc, аудит БЗ Cherry Studio |
+| [docs/COMPARISON.md](docs/COMPARISON.md) | обзор OCR-моделей для Strix Halo (наши тесты GLM-OCR/PaddleOCR-VL/Chandra, modelset 1 vs 2) + сравнение с Docling/DeepDoc, аудит БЗ |
