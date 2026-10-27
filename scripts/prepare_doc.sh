@@ -205,6 +205,12 @@ WATCHER_PID=""
 stop_watcher() { [ -n "$WATCHER_PID" ] && kill "$WATCHER_PID" 2>/dev/null || true; WATCHER_PID=""; }
 trap stop_watcher EXIT
 stage 1/6 "marker (balanced)"
+# вендор-патч marker (raw-HTML хвост на больших документах; scripts/patch_marker.py,
+# HANDOFF «raw-HTML баг»): идемпотентно, живёт в .venv до uv sync
+if ! PATCH_OUT="$(uv run --project "$ROOT" python "$ROOT/scripts/patch_marker.py" 2>&1)"; then
+    echo "[WARN] вендор-патч marker НЕ применён: $PATCH_OUT"
+    echo "[WARN] риск raw-HTML хвоста на >111 стр. — QC-гейт это поймает"
+fi
 # marker именует выход по имени файла: гоняем во временный каталог и переносим
 mkdir -p "$ROOT/logs"
 TMP="$OUT/.tmp.$$"; rm -rf "$TMP"; mkdir -p "$TMP"

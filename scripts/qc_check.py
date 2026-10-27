@@ -52,6 +52,14 @@ if len(_hyph) > 10:
     issues.append("переносы не склеены")
 if t.count("|--") < 2 and t.count("<table") < 2:
     issues.append("таблицы не распознаны (а ожидались)")
+# сырой HTML структуры документа: <div>/data-page-id/data-bbox никогда не
+# легальны в MD-выводе marker — признак слома конвертации (raw-HTML баг,
+# scripts/patch_marker.py). Инлайн-теги (<sup>/<u>/<br>) — легальны, не трогаем.
+_raw = re.findall(r"<div\b|</div>|data-page-id|data-bbox|</html>", t)
+if _raw:
+    issues.append(
+        f"сырой HTML в MD: {len(_raw)} вхождений (<div/data-*) — слом конвертации marker"
+    )
 print(
     f"{p.name}: lang={lang}, cyr={ratio:.1%}/lat={1 - ratio:.1%} "
     f"(среди {cyr + lat} букв), {len(t)} chars"
