@@ -16,14 +16,14 @@
 #   scripts/download_chandra_gguf.sh --force         # перекачать даже при совпавшем хэше
 #
 # Дефолты (переопределяются): REPO=mradermacher/chandra-ocr-2-GGUF,
-# DEST=/media/llm/Models/OCR/chandra-ocr-2-gguf (см. HANDOFF «Следующие шаги» п.4).
+# DEST=models/chandra-ocr-2-gguf в корне репо (совпадает с дефолтом services.sh).
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 REPO="mradermacher/chandra-ocr-2-GGUF"
-DEST="/media/llm/Models/OCR/chandra-ocr-2-gguf"
+DEST="$ROOT/models/chandra-ocr-2-gguf"
 DRY_RUN=0 FORCE=0
 FILES=()
 EXTRA=()

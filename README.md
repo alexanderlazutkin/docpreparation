@@ -117,7 +117,7 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 | Компонент | Роль |
 | --- | --- |
 | [marker-pdf](https://github.com/datalab-to/marker) 2.x (Apache-2.0) | ядро конвертации: layout, таблицы, пагинация (`paginate_output` → `⌗p`) |
-| [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M) | OCR/layout VLM; локально: `/media/llm/Models/OCR/surya-ocr-2-gguf` |
+| [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M) | OCR/layout VLM; локально: `models/surya-ocr-2-gguf/` |
 | [Chandra OCR 2](https://github.com/datalab-to/chandra) (GGUF Q8_0) | block-OCR за прокси (modelset 2): layout-HTML с таблицами/Mermaid/alt |
 | PaddleOCR-VL-1.6 (GGUF) | block-OCR за прокси (modelset 1; `OCR_PROXY_BLOCK_ENGINE=paddle`) |
 | Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32) | captioning/VLM-описания; p=2 (5,4 с/фигура) |
@@ -126,6 +126,24 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 | node + mmdc (Mermaid CLI) | валидация Mermaid в структур. режиме captioning |
 | uv | изолированное окружение проекта (`.venv`, `uv.lock`) |
 | opencode + skill `.opencode/skills/docprep/` | агент ведёт пайплайн (версионируется в репо) |
+
+### Веса моделей
+
+Все GGUF по умолчанию ищутся в `models/` **в корне репо** (каталог в
+`.gitignore`) — скопируй/скачай веса туда, и `services.sh start` заработает
+без конфигурации:
+
+```text
+models/
+├── surya-ocr-2-gguf/          # surya-2.gguf + surya-2-mmproj.gguf
+├── PaddleOCR-VL-1.6/          # PaddleOCR-VL-1.6-GGUF.gguf + …-GGUF-mmproj.gguf
+├── chandra-ocr-2-gguf/        # scripts/download_chandra_gguf.sh (sha256 из HF API)
+└── Qwen3.6-35B-A3B-MTP-GGUF/  # любая GGUF-модель LLM/VLM + mmproj для captioning
+```
+
+Другое расположение (общий каталог моделей на другой диск) — пути
+`*_MODEL`/`*_MMPROJ` в `.env` (шаблон — `.env.example`). Отсутствие весов
+ловится на старте с понятной ошибкой.
 
 ### Наборы моделей (`services.sh --modelset N`, деф. 1; детали — USAGE §2.1, §3.7)
 

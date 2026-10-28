@@ -51,15 +51,17 @@
 # модели на порту — ошибка (marker откажется аттачиться).
 #
 # Модели и порты (переопределяются окружением или .env):
+#   Все веса по умолчанию — в models/ в КОРНЕ РЕПО (каталог в .gitignore;
+#   куда что класть и ссылки — README «Веса моделей»).
 #   MODELSET=1 (деф.; набор запускаемых OCR-сервисов, см. выше)
-#   SURYA_MODEL / SURYA_MMPROJ  (деф. /media/llm/Models/OCR/surya-ocr-2-gguf/…)
+#   SURYA_MODEL / SURYA_MMPROJ  (деф. models/surya-ocr-2-gguf/…)
 #   SURYA_PORT=8510  SURYA_PARALLEL=8  SURYA_CTX=parallel×12288
-#   PADDLE_MODEL / PADDLE_MMPROJ (деф. /media/llm/Models/OCR/PaddleOCR-VL-1.6/…)
+#   PADDLE_MODEL / PADDLE_MMPROJ (деф. models/PaddleOCR-VL-1.6/…)
 #   PADDLE_PORT=8512  PADDLE_PARALLEL=8  PADDLE_CTX=parallel×8192
-#   CHANDRA_MODEL / CHANDRA_MMPROJ (деф. /media/llm/Models/OCR/chandra-ocr-2-gguf/…)
+#   CHANDRA_MODEL / CHANDRA_MMPROJ (деф. models/chandra-ocr-2-gguf/…)
 #   CHANDRA_PORT=8513  CHANDRA_PARALLEL=4  CHANDRA_CTX=parallel×8192
 #   OCR_PROXY_PORT=8511 (scripts/ocr_proxy.py; modelset 1 — деф., 2 — всегда)
-#   LLM_MODEL (деф. /media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf)
+#   LLM_MODEL (деф. models/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf)
 #   LLM_MMPROJ (деф. mmproj-F32.gguf рядом с моделью; пусто = текст-only сервис)
 #   LLM_PORT=8080  LLM_CTX=32768  LLM_PARALLEL=2 (35B: 2 слота × 16k)
 #   WAIT_SVC=600 (сек на загрузку модели в GPU)
@@ -75,25 +77,25 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
 
-SURYA_MODEL="${SURYA_GGUF_LOCAL_MODEL_PATH:-/media/llm/Models/OCR/surya-ocr-2-gguf/surya-2.gguf}"
-SURYA_MMPROJ="${SURYA_GGUF_LOCAL_MMPROJ_PATH:-/media/llm/Models/OCR/surya-ocr-2-gguf/surya-2-mmproj.gguf}"
+SURYA_MODEL="${SURYA_GGUF_LOCAL_MODEL_PATH:-$ROOT/models/surya-ocr-2-gguf/surya-2.gguf}"
+SURYA_MMPROJ="${SURYA_GGUF_LOCAL_MMPROJ_PATH:-$ROOT/models/surya-ocr-2-gguf/surya-2-mmproj.gguf}"
 SURYA_ALIAS="datalab-to/surya-ocr-2"
 SURYA_PORT="${SURYA_PORT:-8510}"
 SURYA_PARALLEL="${SURYA_PARALLEL:-8}"
 SURYA_CTX="${SURYA_CTX:-$((SURYA_PARALLEL * 12288))}"
-LLM_MODEL="${LLM_MODEL:-/media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf}"
-LLM_MMPROJ="${LLM_MMPROJ:-/media/llm/Models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/mmproj-F32.gguf}"
+LLM_MODEL="${LLM_MODEL:-$ROOT/models/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf}"
+LLM_MMPROJ="${LLM_MMPROJ:-$ROOT/models/Qwen3.6-35B-A3B-MTP-GGUF/mmproj-F32.gguf}"
 LLM_PORT="${LLM_PORT:-8080}"
 LLM_CTX="${LLM_CTX:-40000}"
 LLM_PARALLEL="${LLM_PARALLEL:-2}"
-PADDLE_MODEL="${PADDLE_MODEL:-/media/llm/Models/OCR/PaddleOCR-VL-1.6/PaddleOCR-VL-1.6-GGUF.gguf}"
-PADDLE_MMPROJ="${PADDLE_MMPROJ:-/media/llm/Models/OCR/PaddleOCR-VL-1.6/PaddleOCR-VL-1.6-GGUF-mmproj.gguf}"
+PADDLE_MODEL="${PADDLE_MODEL:-$ROOT/models/PaddleOCR-VL-1.6/PaddleOCR-VL-1.6-GGUF.gguf}"
+PADDLE_MMPROJ="${PADDLE_MMPROJ:-$ROOT/models/PaddleOCR-VL-1.6/PaddleOCR-VL-1.6-GGUF-mmproj.gguf}"
 PADDLE_ALIAS="PaddleOCR-VL-1.6"
 PADDLE_PORT="${PADDLE_PORT:-8512}"
 PADDLE_PARALLEL="${PADDLE_PARALLEL:-8}"
 PADDLE_CTX="${PADDLE_CTX:-$((PADDLE_PARALLEL * 8192))}"
-CHANDRA_MODEL="${CHANDRA_MODEL:-/media/llm/Models/OCR/chandra-ocr-2-gguf/chandra-ocr-2.Q8_0.gguf}"
-CHANDRA_MMPROJ="${CHANDRA_MMPROJ:-/media/llm/Models/OCR/chandra-ocr-2-gguf/chandra-ocr-2.mmproj-Q8_0.gguf}"
+CHANDRA_MODEL="${CHANDRA_MODEL:-$ROOT/models/chandra-ocr-2-gguf/chandra-ocr-2.Q8_0.gguf}"
+CHANDRA_MMPROJ="${CHANDRA_MMPROJ:-$ROOT/models/chandra-ocr-2-gguf/chandra-ocr-2.mmproj-Q8_0.gguf}"
 CHANDRA_ALIAS="chandra-ocr-2"
 CHANDRA_PORT="${CHANDRA_PORT:-8513}"
 CHANDRA_PARALLEL="${CHANDRA_PARALLEL:-4}"
@@ -123,6 +125,11 @@ bad()  { printf '  [FAIL] %s\n' "$*"; }
 warn() { printf '  [WARN] %s\n' "$*"; }
 inf()  { printf '  [--]   %s\n' "$*"; }
 die()  { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
+
+need_file() {  # need_file <имя> <путь>: вес должен существовать до старта
+  [ -f "$2" ] || die "$1: файл не найден: $2
+  положи веса в models/ в корне репо или задай путь в .env (см. .env.example)"
+}
 
 model_id() {  # первый id из /v1/models на порту, или пусто
   curl -s -m 5 "http://$HOST:$1/v1/models" \
@@ -204,8 +211,8 @@ stop_svc() {
 }
 
 start_surya() {
-  [ -f "$SURYA_MODEL" ]  || die "surya: модель не найдена: $SURYA_MODEL"
-  [ -f "$SURYA_MMPROJ" ] || die "surya: mmproj не найден: $SURYA_MMPROJ"
+  need_file surya-модель "$SURYA_MODEL"
+  need_file surya-mmproj "$SURYA_MMPROJ"
   inf "surya: $SURYA_MODEL (+ mmproj), parallel=$SURYA_PARALLEL, ctx=$SURYA_CTX"
   start_svc surya "$SURYA_PID" "$SURYA_LOG" "$SURYA_PORT" "$SURYA_ALIAS" \
     -m "$SURYA_MODEL" --mmproj "$SURYA_MMPROJ" \
@@ -214,10 +221,10 @@ start_surya() {
 }
 
 start_llm() {
-  [ -f "$LLM_MODEL" ] || die "llm: модель не найдена: $LLM_MODEL"
+  need_file llm-модель "$LLM_MODEL"
   local mmargs=()
   if [ -n "$LLM_MMPROJ" ]; then
-    [ -f "$LLM_MMPROJ" ] || die "llm: mmproj не найден: $LLM_MMPROJ"
+    need_file llm-mmproj "$LLM_MMPROJ"
     mmargs=(--mmproj "$LLM_MMPROJ")
   fi
   inf "llm: $LLM_MODEL${LLM_MMPROJ:+ (VLM: $(basename "$LLM_MMPROJ"))}, parallel=$LLM_PARALLEL, ctx=$LLM_CTX"
@@ -227,8 +234,8 @@ start_llm() {
 }
 
 start_paddle() {
-  [ -f "$PADDLE_MODEL" ]  || die "paddle: модель не найдена: $PADDLE_MODEL"
-  [ -f "$PADDLE_MMPROJ" ] || die "paddle: mmproj не найден: $PADDLE_MMPROJ"
+  need_file paddle-модель "$PADDLE_MODEL"
+  need_file paddle-mmproj "$PADDLE_MMPROJ"
   inf "paddle: $PADDLE_MODEL (+ mmproj), parallel=$PADDLE_PARALLEL, ctx=$PADDLE_CTX"
   start_svc paddle "$PADDLE_PID" "$PADDLE_LOG" "$PADDLE_PORT" "$PADDLE_ALIAS" \
     -m "$PADDLE_MODEL" --mmproj "$PADDLE_MMPROJ" \
@@ -237,8 +244,8 @@ start_paddle() {
 }
 
 start_chandra() {
-  [ -f "$CHANDRA_MODEL" ]  || die "chandra: модель не найдена: $CHANDRA_MODEL"
-  [ -f "$CHANDRA_MMPROJ" ] || die "chandra: mmproj не найден: $CHANDRA_MMPROJ"
+  need_file chandra-модель "$CHANDRA_MODEL"
+  need_file chandra-mmproj "$CHANDRA_MMPROJ"
   inf "chandra: $CHANDRA_MODEL (+ mmproj), parallel=$CHANDRA_PARALLEL, ctx=$CHANDRA_CTX"
   start_svc chandra "$CHANDRA_PID" "$CHANDRA_LOG" "$CHANDRA_PORT" "$CHANDRA_ALIAS" \
     -m "$CHANDRA_MODEL" --mmproj "$CHANDRA_MMPROJ" \
