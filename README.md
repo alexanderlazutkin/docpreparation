@@ -132,7 +132,7 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 | modelset | Состав | Когда |
 | --- | --- | --- |
 | **1** | surya + Paddle + прокси-pass-through + Qwen | деф.; проверенный стек (`--no-ocr-proxy` — отключить прокси) |
-| **2** | surya (layout/table) + Chandra `:8513` (block-OCR) + Qwen | block-OCR Chandra: пилот качества закрыт положительно (IDEF1X, сложные таблицы), ~1,3× медленнее |
+| **2** | surya (layout/table) + Chandra `:8513` (block-OCR) + Qwen | точечно (не дефолт): сложные таблицы в сканах/битых шрифтах, IDEF1X/ER, битый текст-слой; точнее surya, но на таблице-плотных доках block-OCR ~8× медленнее (когда включать — USAGE §3.7) |
 
 ## Железо и ограничения
 

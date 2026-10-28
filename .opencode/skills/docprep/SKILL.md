@@ -23,9 +23,12 @@ description: Подготовка PDF к загрузке в базу знани
 ```
 - `--modelset N` — код набора моделей (деф. 1; в .env: `MODELSET=1`):
   **1** = surya + Paddle + прокси-pass-through (деф.) + Qwen;
-  **2** = surya + Chandra (block-OCR, layout-HTML с таблицами/Mermaid,
-  гейты пройдены — USAGE §3.7). Новая модель → новый код в services.sh,
-  параметры запуска не запоминать руками.
+  **2** = surya + Chandra (block-OCR, layout-HTML с таблицами/Mermaid) —
+  ТОЧЕЧНО (A/B TPC-H: ~8× медленнее surya на таблице-плотных доках):
+  включать для сложных таблиц в сканах/битых шрифтах (где surya теряет
+  сетку/ repetition-loop), IDEF1X/ER-диаграмм, битого текст-слоя (ToUnicode),
+  небольших доков или точечного `--pages` (когда — USAGE §3.7). Новая модель
+  → новый код в services.sh, параметры запуска не запоминать руками.
 - OCR-прокси — дефолт modelset 1 (с 2026-10-24; старый `--ocr-proxy` — no-op):
   marker аттачится к прокси :8511, все пути идут на surya (прозрачный
   pass-through), PaddleOCR-VL (:8512) поднят рядом. block-OCR на Paddle —
