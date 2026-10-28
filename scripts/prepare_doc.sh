@@ -36,7 +36,7 @@ if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
 
 # Аттач к OCR-стеку (services.sh): если поднят прокси-адаптер (по умолчанию
 # в modelset 1/2) — цепляемся к нему (layout/table_rec→surya,
-# block-OCR→PaddleOCR-VL/Chandra); иначе к постоянному surya-серверу напрямую.
+# block-OCR→Chandra в modelset 2); иначе к постоянному surya-серверу напрямую.
 SURYA_PORT="${SURYA_PORT:-8510}"
 OCR_PROXY_PORT="${OCR_PROXY_PORT:-8511}"
 ATTACHED_PROXY=0

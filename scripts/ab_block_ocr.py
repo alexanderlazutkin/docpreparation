@@ -6,7 +6,7 @@
 сводку: время, символы, доля кириллицы. Использовано в приёмке бедки
 cell--ll3um (адаптер-прокси PaddleOCR-VL → marker, USAGE §3.6) и Chandra
 OCR 2 (modelset 2, USAGE §3.7). Движок прокси берётся из /stats
-(block_engine: paddle|chandra|surya), каталог результата — по имени движка.
+(block_engine: surya|chandra), каталог результата — по имени движка.
 
 Usage: python scripts/ab_block_ocr.py <image.png> [...]   (запускать при
 поднятых сервисах: modelset 1 → services.sh start --modelset 1 --no-llm;
@@ -31,12 +31,12 @@ OUTROOT = "outbox/ocrtests/adapter_ab"
 
 
 def proxy_block_engine() -> str:
-    """block_engine из /stats прокси (деф. paddle — исторический A/B)."""
+    """block_engine из /stats прокси (деф. surya)."""
     try:
         with urllib.request.urlopen(PROXY_STATS, timeout=5) as r:
-            return json.load(r).get("block_engine", "paddle")
+            return json.load(r).get("block_engine", "surya")
     except (OSError, ValueError):
-        return "paddle"
+        return "surya"
 
 
 def cyr_share(text: str) -> float:

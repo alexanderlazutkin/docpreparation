@@ -13,16 +13,16 @@ description: Подготовка PDF к загрузке в базу знани
 
 ## Сервисы inference (`services.sh`)
 ```bash
-./services.sh start              # MODELSET 1 (деф.): surya :8510 + Paddle :8512
-                                  # + прокси :8511 + LLM/VLM :8080 (Qwen3.6-35B-A3B + mmproj-F32, 32,7 ГБ)
+./services.sh start              # MODELSET 1 (деф.): surya :8510 + прокси :8511
+                                  # + LLM/VLM :8080 (Qwen3.6-35B-A3B + mmproj-F32, 32,7 ГБ)
                                   # прокси поднимается по умолчанию; --no-ocr-proxy — отключить
 ./services.sh start --modelset 2 # MODELSET 2: surya (layout/table) + Chandra OCR 2 :8513
-                                  # (block-OCR за прокси :8511) + LLM :8080; paddle не нужен
+                                  # (block-OCR за прокси :8511) + LLM :8080
 ./services.sh check --deep      # статус + проба генерации
 ./services.sh stop              # остановить свои (чужой llama-server не трогает)
 ```
 - `--modelset N` — код набора моделей (деф. 1; в .env: `MODELSET=1`):
-  **1** = surya + Paddle + прокси-pass-through (деф.) + Qwen;
+  **1** = surya + прокси-pass-through (деф.) + Qwen;
   **2** = surya + Chandra (block-OCR, layout-HTML с таблицами/Mermaid) —
   ТОЧЕЧНО (A/B TPC-H: ~8× медленнее surya на таблице-плотных доках):
   включать для сложных таблиц в сканах/битых шрифтах (где surya теряет
@@ -31,13 +31,10 @@ description: Подготовка PDF к загрузке в базу знани
   → новый код в services.sh, параметры запуска не запоминать руками.
 - OCR-прокси — дефолт modelset 1 (с 2026-10-24; старый `--ocr-proxy` — no-op):
   marker аттачится к прокси :8511, все пути идут на surya (прозрачный
-  pass-through), PaddleOCR-VL (:8512) поднят рядом. block-OCR на Paddle —
-  только экспериментально через `OCR_PROXY_BLOCK_ENGINE=paddle` (ломает
-  table-fallback: Paddle даёт plain без <table>, аддендум-4 USAGE). Роутинг
-  автоматический по содержимому, безопасен на любом PDF; отключение прокси —
-  `--no-ocr-proxy` (marker напрямую к surya). В modelset 2 прокси поднимается
-  сам с block-OCR→chandra (флаги прокси игнорируются). Статистика маршрутов:
-  `curl :8511/stats` (включая block_engine).
+  pass-through). Роутинг автоматический по содержимому, безопасен на любом
+  PDF; отключение прокси — `--no-ocr-proxy` (marker напрямую к surya).
+  В modelset 2 прокси поднимается сам с block-OCR→chandra (флаги прокси
+  игнорируются). Статистика маршрутов: `curl :8511/stats` (вкл. block_engine).
 - `prepare_doc.sh` сам аттачится к OCR-стеку (прокси :8511 приоритетнее surya
   :8510) и запускает
   **captioning фигур** через LLM-сервис (VLM-описания после каждой картинки — графика
@@ -65,8 +62,7 @@ description: Подготовка PDF к загрузке в базу знани
 - Для `--use_llm` брать модель/URL из вывода `services.sh check` (строка с флагами marker).
 
 ## Базовый цикл (начинать всегда с него)
-1. `./services.sh start` — модели на GPU (surya + Paddle/прокси +
-   Qwen3.6-35B :8080).
+1. `./services.sh start` — модели на GPU (surya + прокси + Qwen3.6-35B :8080).
 2. Исходники в `inbox/`.
 3. Запуск обработки — **только через `scripts/launch_batch.sh [флаги]`**: агент открывает
    пользователю видимое окно терминала с `prepare_all.sh`. НЕ запускать batch в фоне без окна.

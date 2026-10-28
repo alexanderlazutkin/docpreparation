@@ -10,17 +10,16 @@
 ```bash
 cp .env.example .env                 # один раз
 ./services.sh start                  # 1) модели на GPU (modelset 1, деф.): surya :8510
-                                     #    + Paddle :8512 + прокси-адаптер :8511
-                                     #    + Qwen3.6-35B :8080
+                                     #    + прокси-адаптер :8511 + Qwen3.6-35B :8080
 cp файл(ы).pdf inbox/                # 2) исходники
 scripts/launch_batch.sh              # 3) обработка (откроется окно терминала с прогрессом)
 ./services.sh stop                   # 4) по завершении
 ```
 
 > **OCR-прокси поднимается по умолчанию** (с 2026-10-24; раньше требовался флаг
-> `--ocr-proxy`, теперь он no-op). Прокси-адаптер: все пути идут на surya,
-> PaddleOCR-VL рядом и готов. Содержимое файла оценивает сам marker постранично —
-> ошибиться нельзя (подробное пояснение и таблица маршрутов — §3.6, аддендум-3/4).
+> `--ocr-proxy`, теперь он no-op). Прокси-адаптер: все пути идут на surya
+> (прозрачный pass-through). Содержимое файла оценивает сам marker постранично —
+> ошибиться нельзя (подробное пояснение и таблица маршрутов — §3.6, аддендум-3).
 > Отключить прокси — `./services.sh start --no-ocr-proxy` (обычный режим, только
 > surya). Strix Halo: одновременный подъём с 35B LLM — не проблема (unified
 > memory).
@@ -35,7 +34,7 @@ scripts/launch_batch.sh              # 3) обработка (откроется
 
 **А. Новый документ: сначала проба, потом весь** (рекомендуемая практика)
 ```bash
-./services.sh start                 # стек (деф.): surya + Paddle/прокси + Qwen (LLM)
+./services.sh start                 # стек (деф.): surya + прокси + Qwen (LLM)
 scripts/launch_batch.sh --pages "1-10" # проба 10 стр.: скорость, кириллица, таблицы
 # → глазом глянуть outbox/<имя>__p1-10/<имя>__p1-10.md
 scripts/launch_batch.sh --force        # весь документ целиком (проба перезапишется)
@@ -90,12 +89,12 @@ tail -f logs/batch_latest.log          # стадии + факт-скорост�
 ### 2.1 Сервисы inference — `services.sh`
 | Команда                                                                               | Что делает                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `./services.sh start`                                                                 | modelset 1 (деф.): surya + Paddle + прокси-адаптер + LLM/VLM на GPU (Vulkan); прокси — по умолчанию (§1)                                                                                                                                                                                                                  |
-| `./services.sh start --modelset N`                                                     | набор моделей (деф. 1): **1** = surya + Paddle + прокси (деф.); **2** = surya (layout/table) + Chandra OCR 2 (:8513, block-OCR за прокси) + LLM, paddle не поднимается; гейты Chandra — §3.7                                                                                                                              |
+| `./services.sh start`                                                                 | modelset 1 (деф.): surya + прокси-адаптер + LLM/VLM на GPU (Vulkan); прокси — по умолчанию (§1)                                                                                                                                                                                  |
+| `./services.sh start --modelset N`                                                     | набор моделей (деф. 1): **1** = surya + прокси pass-through (деф.); **2** = surya (layout/table) + Chandra OCR 2 (:8513, block-OCR за прокси) + LLM; гейты Chandra — §3.7                                                                                              |
 | `./services.sh start --llm-parallel 3`                                                | слотов LLM-сервера (деф. 2)                                                                                                                                                                                                                                                                                              |
 | `./services.sh start --llm-model <путь.gguf>`                                         | другая LLM (например, более производительная)                                                                                                                                                                                                                                                                            |
 | `./services.sh start --no-llm`                                                        | только surya (captioning будет пропущен)                                                                                                                                                                                                                                                                                 |
-| `./services.sh start --no-ocr-proxy [--no-llm]`                                       | modelset 1 без Paddle (:8512) и прокси (:8511): marker напрямую к surya. С прокси (деф.): все пути на surya (pass-through), Paddle рядом; `OCR_PROXY_BLOCK_ENGINE=paddle` — экспериментальный block-OCR на Paddle (§3.6 аддендум-4); `prepare_doc.sh` цепляется к прокси автоматически; статистика маршрутов: `curl :8511/stats`. Старый `--ocr-proxy` — no-op (совместимость) |
+| `./services.sh start --no-ocr-proxy [--no-llm]`                                       | modelset 1 без прокси (:8511): marker напрямую к surya. С прокси (деф.): все пути на surya (pass-through); `prepare_doc.sh` цепляется к прокси автоматически; статистика маршрутов: `curl :8511/stats`. Старый `--ocr-proxy` — no-op (совместимость) |
 | `./services.sh start --surya-model X.gguf --surya-mmproj Y.gguf [--surya-parallel N]` | подмена OCR-VLM за алиасом surya (тест GLM-OCR/PaddleOCR-VL; выводы — §3.6)                                                                                                                                                                                                                                              |
 | `./services.sh restart [--modelset N]` / `stop`                                       | рестарт/остановка своих сервисов (чужие не трогает; stop останавливает и chandra)                                                                                                                                                                                                                                        |
 | `./services.sh check --deep`                                                          | статус + проба генерации; печатает готовые флаги `--use_llm`                                                                                                                                                                                                                                                             |
@@ -379,6 +378,12 @@ free-тариф шлюза душится очередью даже при paral
 такой файл в inbox/), C (цена последовательной фрагментации).
 
 ### 3.6 Тест GLM-OCR и PaddleOCR-VL-1.6 как drop-in замена surya-2
+
+> **Статус (2026-10-28): PaddleOCR-VL удалён из стека** — в дефолтном потоке
+> простаивал (block-ENGINE=surya), как block-движок ломал table-fallback
+> (аддендум-4), нишу качественного block-OCR занял Chandra (§3.7). Секция
+> ниже — исторический отчёт об эксперименте и приёмке адаптера.
+
 (замеры 2026-10-14, balanced, стр. 1–20 «АРХИТЕКТУРА», CAPTION_FIGURES=0,
 подмена за алиасом `datalab-to/surya-ocr-2` через флаги `services.sh`)
 
@@ -469,7 +474,7 @@ block-OCR («OCR this block image to HTML.») → Paddle с промптом `<|
   рядом. Ошибиться нельзя.
 - Прокси поднимается по умолчанию (2026-10-24); `--ocr-proxy` — no-op
   (совместимость со старыми командами), отключение — `--no-ocr-proxy`
-  (обычный режим: marker напрямую к surya, Paddle не поднимается).
+  (обычный режим: marker напрямую к surya).
 - Цена режима: ~1,7 ГБ VRAM под Paddle+прокси; на Strix Halo одновременный
   подъём с 35B LLM — не проблема (unified memory).
 - Контроль в процессе: `curl :8511/stats` (счётчики surya/paddle/ошибки),
@@ -507,8 +512,8 @@ Paddle-сервис поднимается и в дефолте: переклю�
 | Скорость ≤2x surya (10,5 с/стр) | PASS при parallel=4: throughput 13,6 с/стр (1,3x); без патологических страниц ~10 с/стр; агрегатная генерация 101 t/s |
 
 **Запуск:** `./services.sh start --modelset 2` — surya :8510 (layout/table для
-marker) + Chandra :8513 + прокси :8511 с `block-OCR→chandra` + LLM :8080.
-Paddle не поднимается; `--ocr-proxy`/`--no-ocr-proxy` игнорируются. Возврат
+marker) + Chandra :8513 + прокси :8511 с `block-OCR→chandra` + LLM :8080;
+`--ocr-proxy`/`--no-ocr-proxy` игнорируются. Возврат
 к дефолту: `./services.sh stop && ./services.sh start --modelset 1`. Прогон
 marker на modelset 2 (СиММА 6 стр.): `chandra_block: 11, errors: 0`, cyr 97,9%, layout
 остался на surya — контракт marker не нарушен.
@@ -658,7 +663,7 @@ UI БЗ индексирует только текст → VLM-описания 
 | 22 | Баг `restart` (всегда передавал `--no-llm` из-за `:+` на «0») | `services.sh`: явные флаги по условию | ✅ |
 | 23 | Окно batch не должно висеть вечно без присмотра | hold в `launch_batch.sh` авто-закрывается через 5 мин | ✅ |
 | 24 | Тест новых OCR-моделей (GLM-OCR, PaddleOCR-VL-1.6) vs surya-2 | drop-in путь: флаги `--surya-model/--surya-mmproj/--surya-parallel`, замеры §3.6 — **отклонено** (несовместимость формата + медленнее); честный замер native-OCR — прямая транскрипция рендеров (опционально) | ✅ §3.6 |
-| 25 | Адаптер-прокси PaddleOCR-VL → marker (гибрид surya+Paddle) | `services.sh start --modelset 1` (деф.; раньше `--ocr-proxy`) — прокси :8511 `scripts/ocr_proxy.py` + Paddle :8512, selftest `--test`, A/B `scripts/ab_block_ocr.py`; приёмка и выводы — §3.6 аддендум-2 | ✅ §3.6 |
+| 25 | Адаптер-прокси PaddleOCR-VL → marker (гибрид surya+Paddle) | `services.sh start --modelset 1` (деф.; раньше `--ocr-proxy`) — прокси :8511 `scripts/ocr_proxy.py` + Paddle :8512, selftest `--test`, A/B `scripts/ab_block_ocr.py`; приёмка и выводы — §3.6 аддендум-2; **Paddle удалён из стека 2026-10-28** (простаивал в дефолте, ломал table-fallback; proxy остался) | ✅ §3.6 |
 | 26 | При фрагментации (`--fragments`) части склеивать в один .md без потерь + проверка | `scripts/merge_fragments.py` (selftest `--selftest`), авто-склейка в `prepare_all.sh` при K>1; приёмка: СиММА 71 стр. × 3 фрагм. — 164К симв., кириллица 90,1%, 35/35 ссылок на картинки, 0 коллизий | ✅ |
 | 27 | Язык VLM-описаний = язык документа (ru/en, только эти два) + лог детекта; промпт редактируемый через env | `detect_lang` в `prepare_doc.sh` (CAPTION_LANG → имя файла → текст → метаданные pdfinfo, деф. ru; лог `[--] язык документа: …`), `caption_figures.py --lang`; `CAPTION_PROMPT` в `.env` (плейсхолдеры `{ctx}`/`{lang}`) | ✅ |
 | 28 | QC-гейт должен учитывать язык документа (англ. документы не должны FAIL-иться по кириллице) | `qc_check.py --lang ru\|en` (ru → кириллица ≥55%, en → латиница ≥55%); язык: `--lang` в `launch_batch/prepare_all/prepare_doc` > `CAPTION_LANG` > авто-детект (реестр 27); детект поднят на уровень файла (работает и без captioning) | ✅ |

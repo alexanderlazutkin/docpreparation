@@ -68,7 +68,7 @@ flowchart TD
         direction TB
         SURYA["surya-2 :8510<br/>layout · table-rec · full-page OCR"]
         PROXY["OCR-прокси :8511<br/>маршрутизация запросов marker"]
-        BLOCK["block-OCR за прокси<br/>modelset 1: surya (+ Paddle :8512)<br/>modelset 2: Chandra :8513"]
+        BLOCK["block-OCR за прокси<br/>modelset 1: surya (pass-through)<br/>modelset 2: Chandra :8513"]
         LLM["Qwen3.6-35B :8080<br/>captioning · --use_llm"]
     end
 
@@ -90,8 +90,8 @@ flowchart TD
 ```bash
 cp .env.example .env          # пути к GGUF-моделям (+ опц. облако captioning)
 uv sync                       # .venv (marker-pdf), глобальный Python не трогается
-./services.sh start           # modelset 1 (деф.): surya :8510 + Paddle :8512
-                              # + прокси :8511 + Qwen :8080 (прокси — по умолчанию)
+./services.sh start           # modelset 1 (деф.): surya :8510 + прокси :8511
+                              # + Qwen :8080 (прокси — по умолчанию)
 ./services.sh start --modelset 2   # modelset 2: surya + Chandra :8513 + прокси + Qwen
 
 cp файл(ы).pdf inbox/
@@ -119,9 +119,8 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 | [marker-pdf](https://github.com/datalab-to/marker) 2.x (Apache-2.0) | ядро конвертации: layout, таблицы, пагинация (`paginate_output` → `⌗p`) |
 | [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M) | OCR/layout VLM; локально: `models/surya-ocr-2-gguf/` |
 | [Chandra OCR 2](https://github.com/datalab-to/chandra) (GGUF Q8_0) | block-OCR за прокси (modelset 2): layout-HTML с таблицами/Mermaid/alt |
-| PaddleOCR-VL-1.6 (GGUF) | block-OCR за прокси (modelset 1; `OCR_PROXY_BLOCK_ENGINE=paddle`) |
 | Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32) | captioning/VLM-описания; p=2 (5,4 с/фигура) |
-| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan) | inference-серверы: surya `:8510`, Paddle `:8512`, Chandra `:8513`, Qwen `:8080` |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan) | inference-серверы: surya `:8510`, Chandra `:8513`, Qwen `:8080` |
 | poppler (`pdfinfo`, `pdftoppm`, `pdftotext`) | метаданные, рендеры, текст-слой |
 | node + mmdc (Mermaid CLI) | валидация Mermaid в структур. режиме captioning |
 | uv | изолированное окружение проекта (`.venv`, `uv.lock`) |
@@ -136,7 +135,6 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 ```text
 models/
 ├── surya-ocr-2-gguf/          # surya-2.gguf + surya-2-mmproj.gguf
-├── PaddleOCR-VL-1.6/          # PaddleOCR-VL-1.6-GGUF.gguf + …-GGUF-mmproj.gguf
 ├── chandra-ocr-2-gguf/        # scripts/download_chandra_gguf.sh (sha256 из HF API)
 └── Qwen3.6-35B-A3B-MTP-GGUF/  # любая GGUF-модель LLM/VLM + mmproj для captioning
 ```
@@ -149,7 +147,7 @@ models/
 
 | modelset | Состав | Когда |
 | --- | --- | --- |
-| **1** | surya + Paddle + прокси-pass-through + Qwen | деф.; проверенный стек (`--no-ocr-proxy` — отключить прокси) |
+| **1** | surya + прокси-pass-through + Qwen | деф.; проверенный стек (`--no-ocr-proxy` — отключить прокси) |
 | **2** | surya (layout/table) + Chandra `:8513` (block-OCR) + Qwen | точечно (не дефолт): сложные таблицы в сканах/битых шрифтах, IDEF1X/ER, битый текст-слой; точнее surya, но на таблице-плотных доках block-OCR ~8× медленнее (когда включать — USAGE §3.7) |
 
 ## Тестовое окружение
@@ -170,10 +168,10 @@ models/
 
 | Конфигурация | Компоненты архитектуры | env / флаги | Грузится в GPU | RAM/VRAM |
 | --- | --- | --- | --- | --- |
-| modelset 1 полный (деф.) | `SURYA :8510` + `PROXY :8511` + `BLOCK → Paddle :8512` + `LLM :8080` | `MODELSET=1` (деф.) | surya 1,4 ГБ + Paddle 1,7 ГБ + Qwen3.6-35B Q6 32,7 ГБ | **~40 ГБ** единой памяти |
+| modelset 1 полный (деф.) | `SURYA :8510` + `PROXY :8511` + `LLM :8080` | `MODELSET=1` (деф.) | surya 1,4 ГБ + Qwen3.6-35B Q6 32,7 ГБ | **~38 ГБ** единой памяти |
 | modelset 2 полный | `SURYA` + `PROXY` + `BLOCK → Chandra :8513` + `LLM` | `MODELSET=2` | surya + Chandra Q8 5,3 ГБ + Qwen3.6-35B | **~42 ГБ** единой памяти |
-| Только OCR (captioning пропускается) | `SURYA` + `PROXY` + `BLOCK → Paddle`; узел `LLM` не поднимается, стадия `[2/6]` скипается | `./services.sh start --no-llm` | surya + Paddle + KV | **~4–5 ГБ** — достаточно 8 ГБ VRAM |
-| OCR локально + облачный LLM | `SURYA`/`PROXY`/`BLOCK` локально; `LLM :8080` не поднимается — стадия `[2/6]` идёт во внешний OpenAI-совместимый API | `CAPTION_API` (URL шлюза) + `CAPTION_MODEL` + `CAPTION_PARALLEL`; ключ — `LLM_API_KEY` | surya (+ Paddle) + KV | **~4–5 ГБ** + стабильный интернет |
+| Только OCR (captioning пропускается) | `SURYA` + `PROXY`; узел `LLM` не поднимается, стадия `[2/6]` скипается | `./services.sh start --no-llm` | surya + KV | **~2–3 ГБ** — достаточно 4 ГБ VRAM |
+| OCR локально + облачный LLM | `SURYA`/`PROXY` локально; `LLM :8080` не поднимается — стадия `[2/6]` идёт во внешний OpenAI-совместимый API | `CAPTION_API` (URL шлюза) + `CAPTION_MODEL` + `CAPTION_PARALLEL`; ключ — `LLM_API_KEY` | surya + KV | **~2–3 ГБ** + стабильный интернет |
 
 - На дискретных GPU (раздельная память) полный modelset требует VRAM ≥ ~36 ГБ
   под 35B-модель — либо задать меньшую `LLM_MODEL` (узел `LLM`; требования

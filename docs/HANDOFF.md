@@ -186,6 +186,21 @@
   каждом прогоне пайплайна без рестарта. `CAPTION_STRUCTURED=1` — теперь
   рабочий режим по умолчанию.
 
+## Текущее состояние (2026-10-28, вечер — Paddle удалён из стека)
+- **PaddleOCR-VL-1.6 ВЫРЕЗАН** (решение пользователя): в дефолтном потоке
+  простаивал (block-ENGINE=surya pass-through), как block-движок ломал
+  table-fallback (DMRB Table 4.19), нишу качественного block-OCR занял
+  Chandra (modelset 2). Удалено: `start_paddle`/PADDLE_* из `services.sh`,
+  paddle-бэкенд из `ocr_proxy.py` (движки теперь surya|chandra, selftest
+  PASS), дефолт ab_block_ocr → surya, секция из `.env.example`, веса из
+  `.env` владельца, README/SKILL/USAGE (§2.1, §3.6-статус-плашка, §3.7,
+  реестр #25) и COMPARISON (TL;DR, §4.2, §5, §7-1). Исторические отчёты
+  экспериментов сохранены с пометкой статуса. Modelset 1 теперь = surya +
+  прокси + LLM (~38 ГБ; OCR-only ~2–3 ГБ). Весы Paddle на диске
+  `/media/llm/Models/OCR/PaddleOCR-VL-1.6/` — можно удалить (~1,7 ГБ).
+- Прокси остаётся: маршрутизация layout/table/fullpage → surya, block-OCR →
+  surya (ms1) | chandra (ms2), /stats, повтор-гвард chandra.
+
 ## Текущее состояние (2026-10-28)
 - **A/B modelset 1 vs 2 — ЗАКРЫТО промежуточным итогом** (решение
   пользователя): ms2 TPC-H досчёт отменён (долго, ~8× медленнее surya на
