@@ -209,9 +209,9 @@
   die до старта GPU). Рабочий `.env` дописан 6 строками (LLM/PADDLE/CHANDRA
   → /media/llm) — поведение машины владельца не изменилось. Исторические
   упоминания /media/llm в USAGE (реестр #20, §3.6) оставлены как запись.
-- **Далее в сессии**: публикация на GitHub (репо СОЗДАН:
-  `https://github.com/alexanderlazutkin/docpreparation`; remote не настроен;
-  LICENSE MIT выбран пользователем; push — по подтверждению).
+- **Опубликовано (2026-10-28)**: LICENSE MIT добавлен, remote
+  `origin = https://github.com/alexanderlazutkin/docpreparation`, push `main`
+  выполнен (перед этим: аудит секретов истории/копии PASS, см. выше).
 - Открытые хвосты прошлых сессий: `__fullraw` можно удалить; snap
   lemonade-server — удаление отложено пользователем.
 
