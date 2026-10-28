@@ -9,7 +9,7 @@
 #   Фрагмент пишется в outbox/<имя>__pS-E/ (полный документ — в outbox/<имя>/).
 # Статус: outbox/<...>/.status; успех: .qc_pass (resume); --force — переобработка.
 # Captioning: локальный LLM-сервис (services.sh) или облако через env
-#   CAPTION_API/CAPTION_MODEL/CAPTION_API_KEY (см. .env.example).
+#   CAPTION_API/CAPTION_MODEL (ключ — LLM_API_KEY; см. .env.example).
 # Язык документа (ru|en, только эти два): флаг --lang > env CAPTION_LANG >
 #   авто-детект (имя файла -> текст документа -> метаданные pdfinfo; деф. ru).
 #   Управляет языком VLM-описаний и гейтом QC (кириллица/латиница >= 55%);

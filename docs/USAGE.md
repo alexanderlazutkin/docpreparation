@@ -149,7 +149,7 @@ scripts/prepare_doc.sh [--force] [--retry-ocr] [--lang ru|en] [--pages "S[-E]"] 
 
 ### 2.4 Captioning: локально / облако
 Локально (дефолт): Qwen3.6-35B через `services.sh`, `CAPTION_PARALLEL=2` (оба слота).
-Облако (OpenAI-совместимый шлюз; ключ `CHERRY_API_KEY` подтягивается сам):
+Облако (любой OpenAI-совместимый шлюз; ключ `LLM_API_KEY` подтягивается сам):
 ```bash
 # .env:
 CAPTION_API=https://open.cherryin.net/v1
@@ -647,7 +647,7 @@ UI БЗ индексирует только текст → VLM-описания 
 | 8 | Прогресс и стадии по файлу, отдельный лог | стадии `[k/6]`, `logs/<имя>.log`, `batch_latest.*` | ✅ e894d3c |
 | 9 | При агентном запуске — видимое окно терминала | `launch_batch.sh` (gnome-terminal) | ✅ e894d3c |
 | 10 | ETA остатка обработки | `logs/timings.jsonl` + медианы, `[N/M] осталось ~T` | ✅ 4c1f8e5 |
-| 11 | Облачные модели (ускорение), большая параллелизация | `CAPTION_API/MODEL/PARALLEL`, ключ `CHERRY_API_KEY`; замеры: локально быстрее | ✅ 95ad636 |
+| 11 | Облачные модели (ускорение), большая параллелизация | `CAPTION_API/MODEL/PARALLEL`, ключ `LLM_API_KEY` (бывш. CHERRY_API_KEY/CAPTION_API_KEY); замеры: локально быстрее | ✅ 95ad636 |
 | 12 | Диапазон страниц (деф. 1…конец) и фрагменты больших файлов | `--pages "S[-E]"`, `--fragments K` | ✅ 4c1f8e5 |
 | 13 | force_ocr-ретрай только по явному флагу | `--retry-ocr` (деф. выкл) | ✅ d8557db |
 | 14 | `LLM_PARALLEL` как параметр запуска (деф. 2) | `services.sh --llm-parallel N` | ✅ 63731d5 |

@@ -173,7 +173,7 @@ models/
 | modelset 1 полный (деф.) | `SURYA :8510` + `PROXY :8511` + `BLOCK → Paddle :8512` + `LLM :8080` | `MODELSET=1` (деф.) | surya 1,4 ГБ + Paddle 1,7 ГБ + Qwen3.6-35B Q6 32,7 ГБ | **~40 ГБ** единой памяти |
 | modelset 2 полный | `SURYA` + `PROXY` + `BLOCK → Chandra :8513` + `LLM` | `MODELSET=2` | surya + Chandra Q8 5,3 ГБ + Qwen3.6-35B | **~42 ГБ** единой памяти |
 | Только OCR (captioning пропускается) | `SURYA` + `PROXY` + `BLOCK → Paddle`; узел `LLM` не поднимается, стадия `[2/6]` скипается | `./services.sh start --no-llm` | surya + Paddle + KV | **~4–5 ГБ** — достаточно 8 ГБ VRAM |
-| OCR локально + облачный LLM | `SURYA`/`PROXY`/`BLOCK` локально; `LLM :8080` не поднимается — стадия `[2/6]` идёт во внешний OpenAI-совместимый API | `CAPTION_API` (URL шлюза) + `CAPTION_MODEL` + `CAPTION_PARALLEL`; ключ — `CAPTION_API_KEY` или `CHERRY_API_KEY` | surya (+ Paddle) + KV | **~4–5 ГБ** + стабильный интернет |
+| OCR локально + облачный LLM | `SURYA`/`PROXY`/`BLOCK` локально; `LLM :8080` не поднимается — стадия `[2/6]` идёт во внешний OpenAI-совместимый API | `CAPTION_API` (URL шлюза) + `CAPTION_MODEL` + `CAPTION_PARALLEL`; ключ — `LLM_API_KEY` | surya (+ Paddle) + KV | **~4–5 ГБ** + стабильный интернет |
 
 - На дискретных GPU (раздельная память) полный modelset требует VRAM ≥ ~36 ГБ
   под 35B-модель — либо задать меньшую `LLM_MODEL` (узел `LLM`; требования

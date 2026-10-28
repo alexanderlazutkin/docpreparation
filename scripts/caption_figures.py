@@ -9,12 +9,12 @@
 
 Бэкенды:
   локальный llama-server (services.sh; thinking-off для Qwen3.x);
-  облачный OpenAI-совместимый API (env CAPTION_API/CAPTION_MODEL/CAPTION_API_KEY;
-  для cherry-шлюза ключ берётся из CHERRY_API_KEY) — запускать с --parallel N>1.
+  облачный OpenAI-совместимый API (env CAPTION_API/CAPTION_MODEL; ключ —
+  LLM_API_KEY) — запускать с --parallel N>1.
 
 Usage: caption_figures.py <file.md> [--limit N] [--parallel N] [--api URL] [--model ID]
                           [--lang ru|en] [--structured]
-Env:  CAPTION_API, CAPTION_MODEL, CAPTION_API_KEY, CAPTION_PARALLEL,
+Env:  CAPTION_API, CAPTION_MODEL, LLM_API_KEY, CAPTION_PARALLEL,
       CAPTION_MIN_BYTES (деф. 20000 — отсекает декоративные),
       CAPTION_LANG (ru|en; деф. ru — язык описаний),
       CAPTION_PROMPT (свой промпт-шаблон; плейсхолдеры {ctx} — контекст,
@@ -346,20 +346,15 @@ STRICT rules:
 OUTCOMES = ("diagram_ok", "diagram_retry", "diagram_fallback", "table", "other", "err")
 
 
-def api_key(api):
-    # явный ключ либо (только для cherry-шлюза) ключ из окружения opencode-конфига
-    k = os.environ.get("CAPTION_API_KEY")
-    if k:
-        return k
-    if "cherryin.net" in api:
-        return os.environ.get("CHERRY_API_KEY")
-    return None
+def api_key():
+    # ключ облачного шлюза из .env (LLM_API_KEY; бывш. CAPTION_API_KEY/CHERRY_API_KEY)
+    return os.environ.get("LLM_API_KEY")
 
 
 def model_alias(api):
     req = urllib.request.Request(f"{api}/models")
-    if api_key(api):
-        req.add_header("Authorization", f"Bearer {api_key(api)}")
+    if api_key():
+        req.add_header("Authorization", f"Bearer {api_key()}")
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)["data"][0]["id"]
 
@@ -403,8 +398,8 @@ def describe(api, alias, img_path, ctx, tpl, lang, structured=False):
     b64 = base64.b64encode(data).decode()
     mime = mimetypes.guess_type(str(img_path))[0] or "image/jpeg"
     headers = {"Content-Type": "application/json"}
-    if api_key(api):
-        headers["Authorization"] = f"Bearer {api_key(api)}"
+    if api_key():
+        headers["Authorization"] = f"Bearer {api_key()}"
     body = {
         "model": alias,
         "messages": [

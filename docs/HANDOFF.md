@@ -26,7 +26,7 @@
   авто-закрытие 5 мин).
 - **Captioning**: локально 35B (5,4 с/фигура при `CAPTION_PARALLEL=2`) — быстрее
   облака (Cherry free: ~19 с, plus: ~16 с); облако подключается env
-  `CAPTION_API/MODEL/PARALLEL` + ключ `CHERRY_API_KEY` (см. USAGE §2.4, §3.1).
+  `CAPTION_API/MODEL/PARALLEL` + ключ `LLM_API_KEY` (см. USAGE §2.4, §3.1).
 - **QC**: кириллица ≥55% среди букв, лидеры, переносы, таблицы. Полный документ
   FAIL → без ретрая (только `--retry-ocr`); фрагменты — мягкий режим.
 - **Замеры производительности** (USAGE §3.5): дефолт surya p=8 оптимален
@@ -476,7 +476,7 @@
    на GitHub и опубликовать**. Remote не настроен: создать репо →
    `git remote add origin …` → `git push -u origin main`. Перед публикацией
    проверить: inbox/outbox/logs вне git (.gitignore — уже), `.env` с
-   CHERRY_API_KEY игнорируется (уже), `*.gguf` игнорируется (уже), в истории
+   LLM_API_KEY (бывш. CHERRY_API_KEY) игнорируется (уже), `*.gguf` игнорируется (уже), в истории
    коммитов секретов нет (`git log -p | grep -i "api\|key\|token"` по
    сомнительным местам); README как витрина + LICENSE выбрать (сейчас нет).
 
