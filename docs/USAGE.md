@@ -95,7 +95,7 @@ tail -f logs/batch_latest.log          # стадии + факт-скорост�
 | `./services.sh start --llm-model <путь.gguf>`                                         | другая LLM (например, более производительная)                                                                                                                                                                                                                                                                            |
 | `./services.sh start --no-llm`                                                        | только surya (captioning будет пропущен)                                                                                                                                                                                                                                                                                 |
 | `./services.sh start --no-ocr-proxy [--no-llm]`                                       | modelset 1 без прокси (:8511): marker напрямую к surya. С прокси (деф.): все пути на surya (pass-through); `prepare_doc.sh` цепляется к прокси автоматически; статистика маршрутов: `curl :8511/stats`. Старый `--ocr-proxy` — no-op (совместимость) |
-| `./services.sh start --surya-model X.gguf --surya-mmproj Y.gguf [--surya-parallel N]` | подмена OCR-VLM за алиасом surya (тест GLM-OCR/PaddleOCR-VL; выводы — §3.6)                                                                                                                                                                                                                                              |
+| `./services.sh start --surya-model X.gguf --surya-mmproj Y.gguf [--surya-parallel N]` | подмена OCR-VLM за алиасом surya (тест новых OCR-VLM; выводы по GLM-OCR/PaddleOCR-VL — §3.6, отклонены)                                                                                                                                                                                                                                              |
 | `./services.sh restart [--modelset N]` / `stop`                                       | рестарт/остановка своих сервисов (чужие не трогает; stop останавливает и chandra)                                                                                                                                                                                                                                        |
 | `./services.sh check --deep`                                                          | статус + проба генерации; печатает готовые флаги `--use_llm`                                                                                                                                                                                                                                                             |
 
@@ -144,7 +144,8 @@ scripts/prepare_doc.sh [--force] [--retry-ocr] [--lang ru|en] [--pages "S[-E]"] 
   Свой `--config_json` у пользователя подавляет автоконфиг — добавь туда
   `"paginate_output": true` вручную (об этом предупредит prepare_doc).
 - Готовые книги (до 2026-10-18) меток не имеют — ретроактивно не добавляются;
-  появятся при следующем репрогоне (план: вместе с `CAPTION_STRUCTURED=1`).
+  появятся при следующем репрогоне (финальные прогоны идут с
+  `CAPTION_STRUCTURED=1`, решение 2026-10-19).
 
 ### 2.4 Captioning: локально / облако
 Локально (дефолт): Qwen3.6-35B через `services.sh`, `CAPTION_PARALLEL=2` (оба слота).
@@ -466,18 +467,18 @@ block-OCR («OCR this block image to HTML.») → Paddle с промптом `<|
 | Разметка «что где лежит» (layout, все страницы) | surya | surya (без изменений) |
 | Полное чтение битых/скан-страниц (full-page) | surya | surya — Paddle не может: нужен HTML с координатами `data-bbox`, это часть обучения модели |
 | Таблицы: сборка из текстового слоя | pdftext-эвристики | — |
-| Таблицы-fallback, формулы (block-OCR) | surya | **surya — чистый pass-through**; Paddle только через `OCR_PROXY_BLOCK_ENGINE=paddle` (аддендум-4) |
+| Таблицы-fallback, формулы (block-OCR) | surya | **surya — чистый pass-through**; движки block-OCR: surya (деф.) \| chandra (modelset 2, §3.7); paddle-движок удалён 2026-10-28 |
 
 Следствия:
 - Режим **безопасен на любом содержимом**: в дефолте прокси прозрачен (все
-  запросы → surya, ни один не модифицируется), Paddle просто готов к работе
-  рядом. Ошибиться нельзя.
+  запросы → surya, ни один не модифицируется). Ошибиться нельзя.
 - Прокси поднимается по умолчанию (2026-10-24); `--ocr-proxy` — no-op
   (совместимость со старыми командами), отключение — `--no-ocr-proxy`
   (обычный режим: marker напрямую к surya).
-- Цена режима: ~1,7 ГБ VRAM под Paddle+прокси; на Strix Halo одновременный
+- Цена режима: лёгкий Python-процесс (раньше ~1,7 ГБ VRAM уходило под
+  Paddle-сервис — удалён 2026-10-28); на Strix Halo одновременный
   подъём с 35B LLM — не проблема (unified memory).
-- Контроль в процессе: `curl :8511/stats` (счётчики surya/paddle/ошибки),
+- Контроль в процессе: `curl :8511/stats` (счётчики surya/chandra/ошибки),
   лог маршрутов `/tmp/docprep-proxy.log`.
 
 **Аддендум-4: block-OCR по умолчанию возвращён на surya (2026-10-16, DMRB
@@ -487,11 +488,10 @@ Paddle вернул plain-строки (без колоночной структ
 full-page), а marker'у нужен `<table>`-HTML → `clean_table_html` отклонил
 ответ → таблица потеряна из выдачи (`tables_ocr_failed: 1`). После возврата
 дефолта на surya те же страницы: таблицы **3/3**, Table 4.19 собрана полной
-сеткой 7 колонок, 71 с. Управление: `OCR_PROXY_BLOCK_ENGINE=surya` (дефолт) |
-`paddle` (опция для экспериментов: block-транскрипция в 3–5× быстрее, но
-table-fallback будет падать — A/B-качество текста при этом равное §3.6-2).
-Paddle-сервис поднимается и в дефолте: переключение движка — перезапуск
-только прокси (`./services.sh restart`), не всего стека.
+сеткой 7 колонок, 71 с. Управление (текущее): `OCR_PROXY_BLOCK_ENGINE=surya`
+(дефолт) | `chandra` (ставится сам в modelset 2, §3.7); paddle-движок удалён
+из стека 2026-10-28 — ломал table-fallback (этот кейс) и простаивал в дефолте.
+Смена движка/набора — `./services.sh stop` → `start`.
 
 
 ### 3.7 Chandra OCR 2 как block-OCR движок (modelset 2, 2026-10-23)
@@ -528,7 +528,7 @@ marker на modelset 2 (СиММА 6 стр.): `chandra_block: 11, errors: 0`, c
 | Layout «Output the layout of this image as JSON…» (все страницы) | JSON surya со схемой bbox; формат закреплён **GBNF-грамматикой** (guided generation llama.cpp) | **только surya** | Chandra/Paddle выдают HTML — грамматика их ответ отклонит |
 | table_rec «Output the table rows then columns as JSON…» | JSON surya (строки/колонки) | **только surya** | та же guided-грамматика |
 | Full-page «OCR this image to HTML» (битые шрифты, сканы) | HTML с `data-bbox`-координатами — часть обучения surya | surya (Chandra даёт свой HTML с другими bbox — marker его не собирает) | HIGH_ACCURACY-путь |
-| Block-OCR «OCR this block image to HTML.» (table-fallback, формулы) | просто HTML блока — формат свободный | surya, paddle (ломает `<table>`), **chandra** ✓ | единственная точка drop-in |
+| Block-OCR «OCR this block image to HTML.» (table-fallback, формулы) | просто HTML блока — формат свободный | surya, **chandra** ✓ (paddle ломал `<table>` — удалён, §3.6-4) | единственная точка drop-in |
 
 Поэтому модельсет 2 = **гибрид**: layout/разметку страниц и full-page чтение
 делает surya (контракт marker), а block-OCR (главная боль surya — repetition-loop
@@ -546,10 +546,10 @@ chandra-HTML страницы → конвертер → MD. Статус: эк�
 **Примеры (modelset):**
 
 ```bash
-# дефолтный проверенный стек (surya + Paddle/прокси + LLM; MODELSET=1 в .env)
+# дефолтный проверенный стек (surya + прокси + LLM; MODELSET=1 в .env)
 ./services.sh start --modelset 1
 
-# стек с Chandra в block-OCR (paddle не поднимется; флаги прокси игнорируются)
+# стек с Chandra в block-OCR (block-OCR→chandra; флаги прокси игнорируются)
 ./services.sh start --modelset 2
 
 # то же без LLM (быстрый тест OCR-тракта, captioning пропустится)
@@ -565,7 +565,7 @@ curl -s :8511/stats        # ... "block_engine": "chandra", "chandra_block": 11,
 Приоритет: флаг `--modelset` сильнее `MODELSET` из `.env` (флаг — точечный
 запуск, `.env` — устойчивый выбор; смена набора — всегда через явный
 `stop` → `start`). Новая OCR-модель в будущем = новый код набора в
-`services.sh` (env `CHANDRA_*`/`PADDLE_*` — образец), параметры запуска
+`services.sh` (env `CHANDRA_*` — образец), параметры запуска
 руками запоминать не нужно.
 
 **Грабли и решения (важно для новых моделей на Qwen3.5-VL):**
@@ -663,7 +663,7 @@ UI БЗ индексирует только текст → VLM-описания 
 | 22 | Баг `restart` (всегда передавал `--no-llm` из-за `:+` на «0») | `services.sh`: явные флаги по условию | ✅ |
 | 23 | Окно batch не должно висеть вечно без присмотра | hold в `launch_batch.sh` авто-закрывается через 5 мин | ✅ |
 | 24 | Тест новых OCR-моделей (GLM-OCR, PaddleOCR-VL-1.6) vs surya-2 | drop-in путь: флаги `--surya-model/--surya-mmproj/--surya-parallel`, замеры §3.6 — **отклонено** (несовместимость формата + медленнее); честный замер native-OCR — прямая транскрипция рендеров (опционально) | ✅ §3.6 |
-| 25 | Адаптер-прокси PaddleOCR-VL → marker (гибрид surya+Paddle) | `services.sh start --modelset 1` (деф.; раньше `--ocr-proxy`) — прокси :8511 `scripts/ocr_proxy.py` + Paddle :8512, selftest `--test`, A/B `scripts/ab_block_ocr.py`; приёмка и выводы — §3.6 аддендум-2; **Paddle удалён из стека 2026-10-28** (простаивал в дефолте, ломал table-fallback; proxy остался) | ✅ §3.6 |
+| 25 | Адаптер-прокси PaddleOCR-VL → marker (гибрид surya+Paddle) | эволюция: прокси :8511 `scripts/ocr_proxy.py` остался в дефолте (движки block-OCR surya\|chandra, selftest `--test`, A/B `scripts/ab_block_ocr.py`); приёмка и выводы — §3.6 аддендум-2; **Paddle удалён из стека 2026-10-28** (простаивал в дефолте, ломал table-fallback) | ✅ §3.6 |
 | 26 | При фрагментации (`--fragments`) части склеивать в один .md без потерь + проверка | `scripts/merge_fragments.py` (selftest `--selftest`), авто-склейка в `prepare_all.sh` при K>1; приёмка: СиММА 71 стр. × 3 фрагм. — 164К симв., кириллица 90,1%, 35/35 ссылок на картинки, 0 коллизий | ✅ |
 | 27 | Язык VLM-описаний = язык документа (ru/en, только эти два) + лог детекта; промпт редактируемый через env | `detect_lang` в `prepare_doc.sh` (CAPTION_LANG → имя файла → текст → метаданные pdfinfo, деф. ru; лог `[--] язык документа: …`), `caption_figures.py --lang`; `CAPTION_PROMPT` в `.env` (плейсхолдеры `{ctx}`/`{lang}`) | ✅ |
 | 28 | QC-гейт должен учитывать язык документа (англ. документы не должны FAIL-иться по кириллице) | `qc_check.py --lang ru\|en` (ru → кириллица ≥55%, en → латиница ≥55%); язык: `--lang` в `launch_batch/prepare_all/prepare_doc` > `CAPTION_LANG` > авто-детект (реестр 27); детект поднят на уровень файла (работает и без captioning) | ✅ |

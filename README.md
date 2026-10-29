@@ -114,17 +114,17 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 
 ## Компоненты
 
-| Компонент | Роль |
-| --- | --- |
+| Компонент                                                           | Роль                                                                    |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | [marker-pdf](https://github.com/datalab-to/marker) 2.x (Apache-2.0) | ядро конвертации: layout, таблицы, пагинация (`paginate_output` → `⌗p`) |
-| [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M) | OCR/layout VLM; локально: `models/surya-ocr-2-gguf/` |
-| [Chandra OCR 2](https://github.com/datalab-to/chandra) (GGUF Q8_0) | block-OCR за прокси (modelset 2): layout-HTML с таблицами/Mermaid/alt |
-| Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32) | captioning/VLM-описания; p=2 (5,4 с/фигура) |
-| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan) | inference-серверы: surya `:8510`, Chandra `:8513`, Qwen `:8080` |
-| poppler (`pdfinfo`, `pdftoppm`, `pdftotext`) | метаданные, рендеры, текст-слой |
-| node + mmdc (Mermaid CLI) | валидация Mermaid в структур. режиме captioning |
-| uv | изолированное окружение проекта (`.venv`, `uv.lock`) |
-| opencode + skill `.opencode/skills/docprep/` | агент ведёт пайплайн (версионируется в репо) |
+| [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M)   | OCR/layout VLM; локально: `models/surya-ocr-2-gguf/`                    |
+| [Chandra OCR 2](https://github.com/datalab-to/chandra) (GGUF Q8_0)  | block-OCR за прокси (modelset 2): layout-HTML с таблицами/Mermaid/alt   |
+| Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32)                               | captioning/VLM-описания; p=2 (5,4 с/фигура)                             |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan)         | inference-серверы: surya `:8510`, Chandra `:8513`, Qwen `:8080`         |
+| poppler (`pdfinfo`, `pdftoppm`, `pdftotext`)                        | метаданные, рендеры, текст-слой                                         |
+| node + mmdc (Mermaid CLI)                                           | валидация Mermaid в структур. режиме captioning                         |
+| uv                                                                  | изолированное окружение проекта (`.venv`, `uv.lock`)                    |
+| opencode + skill `.opencode/skills/docprep/`                        | агент ведёт пайплайн (версионируется в репо)                            |
 
 ### Веса моделей
 
@@ -166,12 +166,12 @@ models/
 (шаблон — `.env.example`, применяются при `services.sh start` / на каждом
 прогоне пайплайна).
 
-| Конфигурация | Компоненты архитектуры | env / флаги | Грузится в GPU | RAM/VRAM |
-| --- | --- | --- | --- | --- |
-| modelset 1 полный (деф.) | `SURYA :8510` + `PROXY :8511` + `LLM :8080` | `MODELSET=1` (деф.) | surya 1,4 ГБ + Qwen3.6-35B Q6 32,7 ГБ | **~38 ГБ** единой памяти |
-| modelset 2 полный | `SURYA` + `PROXY` + `BLOCK → Chandra :8513` + `LLM` | `MODELSET=2` | surya + Chandra Q8 5,3 ГБ + Qwen3.6-35B | **~42 ГБ** единой памяти |
-| Только OCR (captioning пропускается) | `SURYA` + `PROXY`; узел `LLM` не поднимается, стадия `[2/6]` скипается | `./services.sh start --no-llm` | surya + KV | **~2–3 ГБ** — достаточно 4 ГБ VRAM |
-| OCR локально + облачный LLM | `SURYA`/`PROXY` локально; `LLM :8080` не поднимается — стадия `[2/6]` идёт во внешний OpenAI-совместимый API | `CAPTION_API` (URL шлюза) + `CAPTION_MODEL` + `CAPTION_PARALLEL`; ключ — `LLM_API_KEY` | surya + KV | **~2–3 ГБ** + стабильный интернет |
+| Конфигурация                         | Компоненты архитектуры                                                                                       | env / флаги                                                                            | Грузится в GPU                          | RAM/VRAM                           |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------- |
+| modelset 1 полный (деф.)             | `SURYA :8510` + `PROXY :8511` + `LLM :8080`                                                                  | `MODELSET=1` (деф.)                                                                    | surya 1,4 ГБ + Qwen3.6-35B Q6 32,7 ГБ   | **~38 ГБ** единой памяти           |
+| modelset 2 полный                    | `SURYA` + `PROXY` + `BLOCK → Chandra :8513` + `LLM`                                                          | `MODELSET=2`                                                                           | surya + Chandra Q8 5,3 ГБ + Qwen3.6-35B | **~42 ГБ** единой памяти           |
+| Только OCR (captioning пропускается) | `SURYA` + `PROXY`; узел `LLM` не поднимается, стадия `[2/6]` скипается                                       | `./services.sh start --no-llm`                                                         | surya + KV                              | **~2–3 ГБ** — достаточно 4 ГБ VRAM |
+| OCR локально + облачный LLM          | `SURYA`/`PROXY` локально; `LLM :8080` не поднимается — стадия `[2/6]` идёт во внешний OpenAI-совместимый API | `CAPTION_API` (URL шлюза) + `CAPTION_MODEL` + `CAPTION_PARALLEL`; ключ — `LLM_API_KEY` | surya + KV                              | **~2–3 ГБ** + стабильный интернет  |
 
 - На дискретных GPU (раздельная память) полный modelset требует VRAM ≥ ~36 ГБ
   под 35B-модель — либо задать меньшую `LLM_MODEL` (узел `LLM`; требования
