@@ -46,8 +46,16 @@ import urllib.request
 MARK_RU = "> **VLM-описание:**"
 MARK_EN = "> **VLM-description:**"
 MARKS = (MARK_RU, MARK_EN)
-# [^)]*? — допускаем пробелы в имени (вэб-имена вида «Схема ММ.png»)
-IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)]*?\.(?:png|jpe?g|gif|webp))\)", re.IGNORECASE)
+# [^)]*? — допускаем пробелы в имени (вэб-имена вида «Схема ММ.png»);
+# group(1) = alt-текст (триггер слайдового промпта), group(2) = путь
+IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]*?\.(?:png|jpe?g|gif|webp))\)", re.IGNORECASE)
+# alt-префикс wireframe-схем слайдов (pptx_to_md.py): таким фигурам даётся
+# отдельный промпт «раскладка + суть слайда» вместо генерального
+LAYOUT_ALT_PREFIX = "Раскладка слайда"
+
+
+def is_slide_layout(alt: str) -> bool:
+    return alt.strip().startswith(LAYOUT_ALT_PREFIX)
 
 
 def strip_descriptions(lines):
@@ -122,6 +130,12 @@ def selftest():
 
     def check(name, cond):
         checks.append((name, bool(cond)))
+
+    # 0) alt-триггер слайдового промпта и захват alt/пути
+    m = IMG_RE.search("![Раскладка слайда 7](figures/slide_07_layout.png)")
+    check("IMG_RE: alt + путь", m and m.group(1) == "Раскладка слайда 7" and m.group(2) == "figures/slide_07_layout.png")
+    check("слайд-триггер по alt", is_slide_layout("Раскладка слайда 7") and not is_slide_layout("Рисунок 5"))
+    check("слайд-промпт для обоих языков", all("{ctx}" in SLIDE_PROMPTS[k] for k in ("ru", "en")))
 
     # 1) prose-only ru: маркер + текст, дальше контент документа
     lines = [
@@ -345,6 +359,39 @@ STRICT rules:
 # Итоги structured-прогона для сводки (ключи статистики)
 OUTCOMES = ("diagram_ok", "diagram_retry", "diagram_fallback", "table", "other", "err")
 
+# Слайдовый промпт (structured): для wireframe-схем слайдов из pptx_to_md.py
+# (alt «Раскладка слайда N»). Тот же XML-контракт, что STRUCT_PROMPTS —
+# переиспользует parse_structured/assemble_structured; <type> обычно DIAGRAM
+# (flowchart для потоков/процессов, mindmap для классификаций/квадрантов).
+# Особенность: <prose> = РАСКЛАДКА + СУТЬ СЛАЙДА (тезис/аргумент и его
+# последовательность) — то, что теряется при линейной конвертации текста.
+SLIDE_PROMPTS = {
+    "ru": """Ты смотришь на схематичную реконструкцию СЛАЙДА презентации (pptx_to_md): прямоугольники — блоки в их реальных положениях, подписи внутри — реальный текст блоков. Это не скриншот: шрифты и цвета условны, важны расположение, группировка и текст. Контекст документа: {ctx}
+
+Задача — сделать слайд находимым и понятным в полнотекстовой базе знаний. Ответ СТРОГО в XML-тегах, ничего кроме них — ответ читает парсер:
+
+<type>DIAGRAM|OTHER</type>
+<prose>2–3 плотных предложения на русском: СУТЬ СЛАЙДА — какой тезис/аргумент он предъявляет и в какой последовательности ведёт читатель (зоны, колонки, поток), с именами ключевых блоков дословно.</prose>
+<mermaid>Mermaid: flowchart LR/TB — если слайд показывает поток/процесс/архитектуру по шагам; mindmap — если классификацию/квадранты/список равнозначных пунктов; иначе пусто</mermaid>
+<edges>- БЛОК_А -> БЛОК_Б (что передаётся / чем связаны) — по одной на связь; только если DIAGRAM</edges>
+<table_md>пусто</table_md>
+<uncertainties>что не удалось определить надёжно; пусто, если ничего</uncertainties>
+
+Правила: не выдумывай блоки, связи и числа — только то, что видно на схеме; идентификаторы узлов A-Z a-z 0-9 _, кириллица только в метках в кавычках (mindmap — без кавычек); не более 40 строк; вывод — ТОЛЬКО теги.""",
+    "en": """You are looking at a schematic reconstruction of a presentation SLIDE (pptx_to_md): rectangles are blocks in their real positions, labels inside are the blocks' real text. This is not a screenshot: fonts and colors are schematic; positions, grouping and text are what matters. Document context: {ctx}
+
+Goal — make the slide findable and understandable in a full-text knowledge base. Answer with these XML tags ONLY, nothing else — a parser reads your output:
+
+<type>DIAGRAM|OTHER</type>
+<prose>2-3 dense sentences in English: the GIST of the slide — the thesis/argument it presents and the order in which it leads the reader (zones, columns, flow), naming key blocks verbatim.</prose>
+<mermaid>Mermaid: flowchart LR/TB — if the slide shows a step-by-step flow/process/architecture; mindmap — for classifications/quadrants/lists of peers; else empty</mermaid>
+<edges>- BLOCK_A -> BLOCK_B (what is passed / how related) — one per edge; only if DIAGRAM</edges>
+<table_md>empty</table_md>
+<uncertainties>anything you could not determine reliably; empty if none</uncertainties>
+
+Rules: never invent blocks, edges, or numbers — only what is visible in the scheme; node ids A-Z a-z 0-9 underscore, non-Latin only inside quoted labels (mindmap excepted); under 40 lines; output ONLY the tags.""",
+}
+
 
 def api_key():
     # ключ облачного шлюза из .env (LLM_API_KEY; бывш. CAPTION_API_KEY/CHERRY_API_KEY)
@@ -517,11 +564,12 @@ def assemble_structured(sec, lang):
     return "\n\n".join(parts), outcome
 
 
-def describe_structured(api, alias, img_path, ctx, lang):
+def describe_structured(api, alias, img_path, ctx, lang, slide=False):
     """Structured-конвейер: вызов -> парсинг -> mmdc -> ретрай x1 с текстом
-    ошибки -> фолбэк prose. -> (вставка, outcome, сек)."""
+    ошибки -> фолбэк prose. slide=True — промпт «раскладка+суть слайда»
+    (wireframe-фигуры pptx_to_md). -> (вставка, outcome, сек)."""
     t0 = time.time()
-    tpl = STRUCT_PROMPTS[lang]
+    tpl = SLIDE_PROMPTS[lang] if slide else STRUCT_PROMPTS[lang]
     txt, _ = describe(api, alias, img_path, ctx, tpl, lang, structured=True)
     sec = parse_structured(txt)
     retried = False
@@ -654,17 +702,19 @@ def main():
         return j < len(lines) and any(lines[j].startswith(m) for m in MARKS)
 
     # проход 1: очередь уникальных неописанных фигур (документный порядок)
-    todo, seen, ctxs = [], set(), {}
+    todo, seen, ctxs, slide_figs = [], set(), {}, set()
     for i, ln in enumerate(lines):
         if described(i):
             continue
         for m in IMG_RE.finditer(ln):
-            p = path_of(m.group(1))
+            p = path_of(m.group(2))
             if p and p not in seen:
                 seen.add(p)
                 ctxs[p] = re.sub(
                     r"[*_#>`\[\]()|]", " ", "".join(lines[max(0, i - 6) : i])
                 )
+                if is_slide_layout(m.group(1)):
+                    slide_figs.add(p)
                 todo.append(p)
     m_total = len(todo)
     if not todo:
@@ -688,7 +738,7 @@ def main():
 
     def work(p):
         if a.structured:
-            return describe_structured(a.api, alias, p, ctxs[p], a.lang)
+            return describe_structured(a.api, alias, p, ctxs[p], a.lang, slide=p in slide_figs)
         txt, dt = describe(a.api, alias, p, ctxs[p], tpl, a.lang)
         return txt, None, dt
 
@@ -732,7 +782,7 @@ def main():
     out, tiny, cached = [], 0, 0
     for i, ln in enumerate(lines):
         out.append(ln)
-        refs = [mm.group(1) for mm in IMG_RE.finditer(ln)]
+        refs = [mm.group(2) for mm in IMG_RE.finditer(ln)]
         if not refs or described(i):
             continue
         ins = []

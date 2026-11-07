@@ -47,12 +47,16 @@ PDF: шрифты без ToUnicode дают 0% кириллицы в индек�
   `/stats` прокси, сводная таблица PASS/FAIL, паузы на охлаждение.
 - **Вэб-путь** (`prepare_web.sh`) — MD из Obsidian Web Clipper → тот же
   captioning + cleanup + QC.
+- **Другие входы** — CHM-справочники (`chm_to_md.py`) и презентации PPTX
+  (`pptx_to_md.py`: SVG→PNG, данные диаграмм таблицей, SmartArt, заметки
+  докладчика, якоря слайдов `⌗s.N`) → тот же captioning + cleanup + QC.
 
 ## Архитектура
 
 ```mermaid
 flowchart TD
     PDF["inbox/*.pdf"] --> S1
+    SIDE["inbox: *.pptx · распакованный CHM · *.md<br/>pptx_to_md · chm_to_md · prepare_web<br/>(без marker/OCR)"] --> S2
 
     subgraph pipeline["Пайплайн — prepare_doc.sh"]
         direction TB
@@ -92,14 +96,26 @@ cp .env.example .env          # пути к GGUF-моделям (+ опц. об�
 uv sync                       # .venv (marker-pdf), глобальный Python не трогается
 ./services.sh start           # modelset 1 (деф.): surya :8510 + прокси :8511
                               # + Qwen :8080 (прокси — по умолчанию)
-./services.sh start --modelset 2   # modelset 2: surya + Chandra :8513 + прокси + Qwen
-
-cp файл(ы).pdf inbox/
-scripts/launch_batch.sh       # пакет: видимое окно, логи logs/batch_latest.*
-./services.sh stop
-# результат: outbox/<имя>/<имя>.md — готов к загрузке в БЗ
-# (UI с локальной базой знаний: Open WebUI, AnythingLLM, Khoj…)
 ```
+
+**PDF** → `inbox/`, далее (полные рецепты всех входов — USAGE §1):
+```bash
+scripts/launch_batch.sh --lang ru                     # небольшой документ
+scripts/launch_batch.sh --fragments 2 --fragment-pause 90 --lang en   # книга кусками
+./services.sh stop
+```
+
+**PPTX / CHM / вэб-MD** — те же `outbox/` и стадии captioning→cleanup→QC,
+вход без marker/OCR (подробно — USAGE §1.5–1.7):
+```bash
+uv run python scripts/pptx_to_md.py "inbox/<Имя>.pptx"   # презентация → MD+figures
+uv run python scripts/chm_to_md.py <путь/data.hhc>       # справочник → MD+figures
+scripts/launch_batch.sh                                  # inbox/*.md → prepare_web.sh
+```
+
+Результат: `outbox/<Имя>/<Имя>.md` — готов к загрузке в БЗ (Open WebUI,
+AnythingLLM, Khoj…); картинки в БЗ не нужны — весь визуальный контент уже
+вшит в текст (VLM-описания, Mermaid, «Суть слайда»).
 
 Примеры вызовов (полный набор — USAGE §2.0–2.2):
 
@@ -122,6 +138,7 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 | Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32)                               | captioning/VLM-описания; p=2 (5,4 с/фигура)                             |
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan)         | inference-серверы: surya `:8510`, Chandra `:8513`, Qwen `:8080`         |
 | poppler (`pdfinfo`, `pdftoppm`, `pdftotext`)                        | метаданные, рендеры, текст-слой                                         |
+| python-pptx + cairosvg                                              | вход PPTX: текст/таблицы/заметки/диаграммы, SVG→PNG, цветной wireframe  |
 | node + mmdc (Mermaid CLI)                                           | валидация Mermaid в структур. режиме captioning                         |
 | uv                                                                  | изолированное окружение проекта (`.venv`, `uv.lock`)                    |
 | opencode + skill `.opencode/skills/docprep/`                        | агент ведёт пайплайн (версионируется в репо)                            |
