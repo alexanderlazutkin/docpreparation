@@ -1,11 +1,12 @@
-# docpreparation — преп-пайплайн PDF → Markdown для базы знаний
+# docpreparation — преп-пайплайн документов → Markdown для базы знаний
 
-Локальный конвейер подготовки документов: **PDF → готовый `.md`** (текст,
-таблицы, VLM-описания графики, метки страниц) с QC-гейтом качества.
-Целевые потребители — **любой UI с локальной базой знаний** (Open WebUI,
-AnythingLLM, Khoj…) и Obsidian: пайплайн от UI не зависит, на выходе —
-готовый к индексации Markdown. Всё считается на локальном железе
-(Strix Halo / Radeon 8060S, llama.cpp/Vulkan), без облака.
+Локальный конвейер подготовки документов: **PDF, презентации PPTX,
+CHM-справочники, вэб-страницы → готовый `.md`** (текст, таблицы, VLM-описания
+графики, якоря источника) с QC-гейтом качества. Целевые потребители — **любой
+UI с локальной базой знаний** (Open WebUI, AnythingLLM, Khoj…) и Obsidian:
+пайплайн от UI не зависит, на выходе — готовый к индексации Markdown. Всё
+считается на локальном железе (Strix Halo / Radeon 8060S, llama.cpp/Vulkan),
+без облака.
 
 > Главный справочник по возможностям, примерам, замерам и реестру требований —
 > [docs/USAGE.md](docs/USAGE.md). Статус/планы — [docs/HANDOFF.md](docs/HANDOFF.md).
@@ -18,9 +19,12 @@ PDF: шрифты без ToUnicode дают 0% кириллицы в индек�
 нет layout-анализа и привязки к страницам (аудит двух БЗ —
 [docs/COMPARISON.md](docs/COMPARISON.md)).
 
-Вывод: **PDF не должен быть рабочим форматом входа в БЗ** — конвертация
-делается заранее, вне UI, с контролем качества. Готовый `.md` индексируется
-чисто.
+То же с остальными входами: презентации теряют раскладку и заметки
+докладчика, CHM/вэб-материалы — картинки и структуру. Вывод: **сырые форматы
+не должны быть рабочим входом в БЗ** — конвертация делается заранее, вне UI,
+с контролем качества. Готовый `.md` индексируется чисто, а весь визуальный
+контент (схемы, диаграммы, таблицы, «суть слайда») вшит в текст
+VLM-описаниями.
 
 ## Возможности
 
@@ -39,12 +43,13 @@ PDF: шрифты без ToUnicode дают 0% кириллицы в индек�
 - **Фрагментация + автосклейка** (`--fragments K`, `merge_fragments.py`) —
   огромные книги кусками; resume с места обрыва, посимвольная проверка
   вхождения частей, объединение `_meta.json`.
-- **Гибридный OCR-стек** (`ocr_proxy.py`) — OpenAI-совместимый прокси за алиасом
-  surya: layout/table-rec = surya, block-OCR = выбранный движок (modelset);
-  A/B-сравнение движков (`ab_block_ocr.py`).
-- **Batch-обвязка** (`launch_batch.sh` / `prepare_all.sh`) — авто-диспетчер по
-  типу inbox, resume (`.qc_pass`), ETA по медиане таймингов, факт-скорость по
-  `/stats` прокси, сводная таблица PASS/FAIL, паузы на охлаждение.
+- **OCR-стек с прокси** (`ocr_proxy.py`) — OpenAI-совместимый прокси за алиасом
+  surya: layout/table-rec/block-OCR = surya (pass-through), статистика
+  маршрутов `/stats`; блок-движок расширяем (A/B — `ab_block_ocr.py`).
+- **Batch-обвязка** (`launch_batch.sh`) — авто-диспетчер смешанного inbox
+  (pptx → chm → md → pdf, каждому типу — свой обработчик), resume
+  (`.qc_pass`), ETA, факт-скорость по `/stats` прокси, сводная таблица
+  PASS/FAIL, паузы на охлаждение.
 - **Вэб-путь** (`prepare_web.sh`) — MD из Obsidian Web Clipper → тот же
   captioning + cleanup + QC.
 - **Другие входы** — CHM-справочники (`chm_to_md.py`) и презентации PPTX
@@ -72,13 +77,11 @@ flowchart TD
         direction TB
         SURYA["surya-2 :8510<br/>layout · table-rec · full-page OCR"]
         PROXY["OCR-прокси :8511<br/>маршрутизация запросов marker"]
-        BLOCK["block-OCR за прокси<br/>modelset 1: surya (pass-through)<br/>modelset 2: Chandra :8513"]
         LLM["Qwen3.6-35B :8080<br/>captioning · --use_llm"]
     end
 
     S1 -. "SURYA_INFERENCE_URL" .-> PROXY
     PROXY -.-> SURYA
-    PROXY -.-> BLOCK
     S2 -.-> LLM
 
     S6 --> OUT["outbox/&lt;имя&gt;/&lt;имя&gt;.md + фигуры + _meta.json<br/>→ БЗ любого UI (Open WebUI, AnythingLLM, Khoj…) · Obsidian"]
@@ -94,8 +97,7 @@ flowchart TD
 ```bash
 cp .env.example .env          # пути к GGUF-моделям (+ опц. облако captioning)
 uv sync                       # .venv (marker-pdf), глобальный Python не трогается
-./services.sh start           # modelset 1 (деф.): surya :8510 + прокси :8511
-                              # + Qwen :8080 (прокси — по умолчанию)
+./services.sh start           # surya :8510 + прокси :8511 + Qwen :8080
 ```
 
 **PDF** → `inbox/`, далее (полные рецепты всех входов — USAGE §1):
@@ -134,9 +136,8 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 | ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | [marker-pdf](https://github.com/datalab-to/marker) 2.x (Apache-2.0) | ядро конвертации: layout, таблицы, пагинация (`paginate_output` → `⌗p`) |
 | [surya-2](https://github.com/datalab-to/surya) (GGUF, OpenRAIL-M)   | OCR/layout VLM; локально: `models/surya-ocr-2-gguf/`                    |
-| [Chandra OCR 2](https://github.com/datalab-to/chandra) (GGUF Q8_0)  | block-OCR за прокси (modelset 2): layout-HTML с таблицами/Mermaid/alt   |
 | Qwen3.6-35B-A3B (GGUF Q6, mmproj-F32)                               | captioning/VLM-описания; p=2 (5,4 с/фигура)                             |
-| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan)         | inference-серверы: surya `:8510`, Chandra `:8513`, Qwen `:8080`         |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) (Vulkan)         | inference-серверы: surya `:8510`, Qwen `:8080`                          |
 | poppler (`pdfinfo`, `pdftoppm`, `pdftotext`)                        | метаданные, рендеры, текст-слой                                         |
 | python-pptx + cairosvg                                              | вход PPTX: текст/таблицы/заметки/диаграммы, SVG→PNG, цветной wireframe  |
 | node + mmdc (Mermaid CLI)                                           | валидация Mermaid в структур. режиме captioning                         |
@@ -152,20 +153,12 @@ CAPTION_STRUCTURED=1 scripts/launch_batch.sh  # структур. VLM-описа
 ```text
 models/
 ├── surya-ocr-2-gguf/          # surya-2.gguf + surya-2-mmproj.gguf
-├── chandra-ocr-2-gguf/        # scripts/download_chandra_gguf.sh (sha256 из HF API)
 └── Qwen3.6-35B-A3B-MTP-GGUF/  # любая GGUF-модель LLM/VLM + mmproj для captioning
 ```
 
 Другое расположение (общий каталог моделей на другой диск) — пути
 `*_MODEL`/`*_MMPROJ` в `.env` (шаблон — `.env.example`). Отсутствие весов
 ловится на старте с понятной ошибкой.
-
-### Наборы моделей (`services.sh --modelset N`, деф. 1; детали — USAGE §2.1, §3.7)
-
-| modelset | Состав | Когда |
-| --- | --- | --- |
-| **1** | surya + прокси-pass-through + Qwen | деф.; проверенный стек (`--no-ocr-proxy` — отключить прокси) |
-| **2** | surya (layout/table) + Chandra `:8513` (block-OCR) + Qwen | точечно (не дефолт): сложные таблицы в сканах/битых шрифтах, IDEF1X/ER, битый текст-слой; точнее surya, но на таблице-плотных доках block-OCR ~8× медленнее (когда включать — USAGE §3.7) |
 
 ## Тестовое окружение
 
@@ -185,12 +178,11 @@ models/
 
 | Конфигурация                         | Компоненты архитектуры                                                                                       | env / флаги                                                                            | Грузится в GPU                          | RAM/VRAM                           |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------- |
-| modelset 1 полный (деф.)             | `SURYA :8510` + `PROXY :8511` + `LLM :8080`                                                                  | `MODELSET=1` (деф.)                                                                    | surya 1,4 ГБ + Qwen3.6-35B Q6 32,7 ГБ   | **~38 ГБ** единой памяти           |
-| modelset 2 полный                    | `SURYA` + `PROXY` + `BLOCK → Chandra :8513` + `LLM`                                                          | `MODELSET=2`                                                                           | surya + Chandra Q8 5,3 ГБ + Qwen3.6-35B | **~42 ГБ** единой памяти           |
+| Полный стек (деф.)                   | `SURYA :8510` + `PROXY :8511` + `LLM :8080`                                                                  | —                                                                                      | surya 1,4 ГБ + Qwen3.6-35B Q6 32,7 ГБ   | **~38 ГБ** единой памяти           |
 | Только OCR (captioning пропускается) | `SURYA` + `PROXY`; узел `LLM` не поднимается, стадия `[2/6]` скипается                                       | `./services.sh start --no-llm`                                                         | surya + KV                              | **~2–3 ГБ** — достаточно 4 ГБ VRAM |
 | OCR локально + облачный LLM          | `SURYA`/`PROXY` локально; `LLM :8080` не поднимается — стадия `[2/6]` идёт во внешний OpenAI-совместимый API | `CAPTION_API` (URL шлюза) + `CAPTION_MODEL` + `CAPTION_PARALLEL`; ключ — `LLM_API_KEY` | surya + KV                              | **~2–3 ГБ** + стабильный интернет  |
 
-- На дискретных GPU (раздельная память) полный modelset требует VRAM ≥ ~36 ГБ
+- На дискретных GPU (раздельная память) полный стек требует VRAM ≥ ~36 ГБ
   под 35B-модель — либо задать меньшую `LLM_MODEL` (узел `LLM`; требования
   падают пропорционально размеру модели), либо облачный captioning.
 - Облачный captioning: любой OpenAI-совместимый шлюз (замер на Cherry-шлюзе:
@@ -204,7 +196,7 @@ models/
 - Загрузка готового `.md` в БЗ — вручную через UI выбранного приложения
   (открытого API добавления материалов у большинства нет); после загрузки
   проверить реальными поисковыми запросами.
-- Смена набора сервисов (`--modelset`, `--no-ocr-proxy`, `--surya-*`) — только
+- Смена флагов сервисов (`--no-ocr-proxy`, `--surya-*`, `--llm-*`) — только
   через явный `./services.sh stop` → `start` (restart с `--no-llm` не трогает surya).
 
 ## Документация
@@ -213,4 +205,4 @@ models/
 |---|---|
 | [docs/USAGE.md](docs/USAGE.md) | главный справочник: сценарии, все флаги, замеры, реестр требований |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | статус, открытые вопросы, следующие шаги, грабли |
-| [docs/COMPARISON.md](docs/COMPARISON.md) | обзор OCR-моделей для Strix Halo (наши тесты GLM-OCR/PaddleOCR-VL/Chandra, modelset 1 vs 2) + сравнение с Docling/DeepDoc, аудит БЗ |
+| [docs/COMPARISON.md](docs/COMPARISON.md) | обзор OCR-моделей для Strix Halo (наши тесты, вкл. отклонённые) + сравнение с Docling/DeepDoc, аудит БЗ |
